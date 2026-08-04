@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "log_level": "info",
+  "log_retention_days": 90,
+  "fetch_both_platforms": true,
+  "keep_metadata_sidecars": true,
+  "drop_incoming_after_sync": false,
+  "re_deflate_store": false,
+  "auto_compact_threshold_mb": 0
+}
