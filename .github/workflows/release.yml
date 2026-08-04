@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build Linux binary
+        run: cd src && go build -trimpath -ldflags="-s -w" -o ../TakeOutBack/tools/linux/takeoutback ./cmd/takeoutback
+
+      - name: Build Windows binary
+        run: cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ../TakeOutBack/tools/windows/takeoutback.exe ./cmd/takeoutback
+
+      - name: Generate checksums
+        run: |
+          cd TakeOutBack/tools/linux
+          sha256sum takeoutback > takeoutback.sha256
+          cd ../windows
+          sha256sum takeoutback.exe > takeoutback.exe.sha256
+
+      - name: Create release assets directory
+        run: |
+          mkdir -p dist
+          cp TakeOutBack/tools/linux/takeoutback dist/takeoutback-linux-amd64
+          cp TakeOutBack/tools/linux/takeoutback.sha256 dist/takeoutback-linux-amd64.sha256
+          cp TakeOutBack/tools/windows/takeoutback.exe dist/takeoutback-windows-amd64.exe
+          cp TakeOutBack/tools/windows/takeoutback.exe.sha256 dist/takeoutback-windows-amd64.exe.sha256
+          cp TakeOutBack.sh dist/TakeOutBack.sh
+          cp TakeOutBack.bat dist/TakeOutBack.bat
+          cp TakeOutBack/scripts/install.sh dist/install.sh
+          cp TakeOutBack/scripts/install.ps1 dist/install.ps1
+          cp TakeOutBack/config/settings.json dist/settings.json
+          cp TakeOutBack/config/policy.json dist/policy.json
+          cp TakeOutBack/config/VERSION dist/VERSION
+          cp README.md dist/README.md
+          cp docs/Architecture.md dist/Architecture.md
+          cp docs/Installation.md dist/Installation.md
+          cp docs/Usage.md dist/Usage.md
+          cp docs/Development.md dist/Development.md
+          cp docs/Troubleshooting.md dist/Troubleshooting.md
+          cp CHANGELOG.md dist/CHANGELOG.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

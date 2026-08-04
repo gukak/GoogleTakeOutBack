@@ -1,0 +1,32 @@
+# Build outputs
+TakeOutBack/tools/linux/takeoutback
+TakeOutBack/tools/windows/takeoutback.exe
+*.exe
+*.tmp
+*.log
+
+# User data - never commit personal archives
+Incoming/
+Archive/
+TakeOutBack/logs/
+TakeOutBack/temp/
+TakeOutBack/config/settings.json
+TakeOutBack/config/policy.json
+TakeOutBack/config/VERSION
+
+# Runtime marker created when the binary runs in a project folder
+.takeoutback-root
+
+# Go
+src/go.sum
+src/vendor/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.idea/
+.vscode/
+*.swp

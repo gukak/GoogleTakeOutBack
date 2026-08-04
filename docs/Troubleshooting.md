@@ -1,0 +1,117 @@
+# Troubleshooting Guide
+
+## General Approach
+
+TakeOutBack is intentionally simple. Almost every problem can be diagnosed by:
+
+1. Reading the latest log file in `TakeOutBack/logs/`.
+2. Running `./TakeOutBack.sh verify`.
+3. Checking that the project layout is intact.
+
+## Common Issues
+
+### "takeoutback: binary not found"
+
+The launcher cannot find the native binary. Ensure:
+
+- `TakeOutBack/tools/linux/takeoutback` exists on Linux.
+- `TakeOutBack\tools\windows\takeoutback.exe` exists on Windows.
+- You are running the launcher from the project root.
+
+If you copied the folder from a Windows/exFAT drive to Linux, the Linux binary
+may have lost its executable bit. The launcher tries to restore it automatically;
+if that fails, run:
+
+```bash
+chmod +x TakeOutBack/tools/linux/takeoutback
+```
+
+### "cannot acquire lock"
+
+Another TakeOutBack instance is already running. If you are sure no other
+instance is running, delete the stale lock file:
+
+```bash
+rm Archive/.consolidated.lock
+```
+
+### Sync reports modified files every time
+
+This can happen if the same Takeout ZIP is processed repeatedly and the archive
+does not yet contain a matching version. Run sync once, then run it again. The
+second run should report all files as skipped. If it does not, run:
+
+```bash
+./TakeOutBack.sh verify --deep
+```
+
+### Archive appears corrupted after a crash
+
+TakeOutBack runs recovery automatically at the start of every sync. If recovery
+fails, the log file will contain details. You can force a full rebuild with:
+
+```bash
+./TakeOutBack.sh compact
+```
+
+`compact` reads every valid local file header and writes a brand-new archive.
+No historical data is lost.
+
+### Verify reports CRC errors
+
+A CRC error means a payload does not match its recorded checksum. This can be
+caused by:
+
+- A bad download of an incoming Takeout ZIP.
+- Bit rot on the storage device.
+- A bug in an older version of TakeOutBack.
+
+First, re-download the suspect Takeout ZIP and run sync again. If the error
+persists, run:
+
+```bash
+./TakeOutBack.sh compact
+./TakeOutBack.sh verify --deep
+```
+
+### Installer fails to download files
+
+The installer downloads assets from GitHub Releases. If the repository URL is
+still the placeholder `gukak/GoogleTakeOutBack`, downloads will fail. Replace it
+with your real owner/repository before releasing.
+
+If you are offline, the installer cannot work. Use the manual install procedure
+described in [Installation.md](Installation.md).
+
+### Update says "Already up to date" but a newer release exists
+
+The updater compares the local version string with the latest GitHub Release
+tag. Ensure:
+
+- `TakeOutBack/config/VERSION` matches the installed binary version.
+- The newer release is actually published (not a draft).
+- You have network connectivity.
+
+### Windows Defender or antivirus warns about the binary
+
+Static Go binaries are sometimes flagged by heuristics. The binary is built from
+the published source with `CGO_ENABLED=0`. You can rebuild it yourself to verify.
+
+## Reporting Bugs
+
+Include:
+
+- The exact command you ran.
+- The full output.
+- The relevant log file from `TakeOutBack/logs/`.
+- Your operating system version.
+- The output of `./TakeOutBack.sh --version`.
+
+## Recovery Checklist
+
+1. Stop any running TakeOutBack instance.
+2. Back up `Archive/Consolidated.zip` if possible.
+3. Run `./TakeOutBack.sh verify --deep`.
+4. If errors are found, run `./TakeOutBack.sh compact`.
+5. Run `./TakeOutBack.sh verify --deep` again.
+6. If problems persist, open an issue with the logs.
