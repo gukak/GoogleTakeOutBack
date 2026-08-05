@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.2] - 2026-08-04
+
+### Fixed
+- Installer downloads the wrong version: `install.sh` / `install.ps1` had a
+  hardcoded default version that fell behind the release they shipped in.
+  The Release workflow now templates the actual tag into the installers at
+  build time, so `releases/download/vX.Y.Z/install.sh` always installs `vX.Y.Z`.
+
 ## [v0.3.1] - 2026-08-04
 
 ### Fixed

@@ -30,6 +30,15 @@ jobs:
           cd ../windows
           sha256sum takeoutback.exe > takeoutback.exe.sha256
 
+      - name: Template release version into installers
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          sed -i "s|TAKEOUTBACK_VERSION:-v[0-9][0-9a-zA-Z.]*|TAKEOUTBACK_VERSION:-${TAG}|" TakeOutBack/scripts/install.sh
+          sed -i "s|Version = \"v[0-9][0-9a-zA-Z.]*\"|Version = \"${TAG}\"|" TakeOutBack/scripts/install.ps1
+          echo "Templated installers to ${TAG}"
+          grep -n "TAKEOUTBACK_VERSION:-" TakeOutBack/scripts/install.sh
+          grep -n 'Version = "' TakeOutBack/scripts/install.ps1
+
       - name: Create release assets directory
         run: |
           mkdir -p dist

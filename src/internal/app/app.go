@@ -13,7 +13,7 @@ import (
 )
 
 // Version is the current takeoutback version. It is overridden at build time.
-const Version = "v0.3.1"
+const Version = "v0.3.2"
 
 // OwnerRepo is the GitHub owner/repository used by the installer and updater.
 // Change this to the real repository before the first release.
