@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,7 +14,7 @@ import (
 )
 
 // Version is the current takeoutback version. It is overridden at build time.
-const Version = "v0.3.5"
+const Version = "v0.3.6"
 
 // OwnerRepo is the GitHub owner/repository used by the installer and updater.
 // Change this to the real repository before the first release.
@@ -334,9 +335,11 @@ func NormalizeKey(p string) string {
 }
 
 // InsertVersionSuffix inserts __vN before the final extension of the basename.
+// It uses path (forward slashes) because names inside ZIP archives always use
+// '/' as separators, independent of the host OS.
 func InsertVersionSuffix(name string, n int) string {
-	base := filepath.Base(name)
-	dir := filepath.Dir(name)
+	base := path.Base(name)
+	dir := path.Dir(name)
 	suffix := fmt.Sprintf("__v%d", n)
 	if i := strings.LastIndex(base, "."); i > 0 {
 		base = base[:i] + suffix + base[i:]
@@ -346,5 +349,5 @@ func InsertVersionSuffix(name string, n int) string {
 	if dir == "." {
 		return base
 	}
-	return filepath.ToSlash(filepath.Join(dir, base))
+	return path.Join(dir, base)
 }

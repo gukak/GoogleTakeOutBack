@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.6] - 2026-08-04
+
+### Fixed
+- Windows batch launcher: avoid `"F:\\"` escaping the closing quote and
+  corrupting the `--root` path by appending `.` to the directory argument.
+- Use `path` (forward slashes) for ZIP entry name manipulation so file-version
+  suffixes and skip-name patterns behave identically on Linux and Windows.
+
 ## [v0.3.5] - 2026-08-04
 
 ### Added

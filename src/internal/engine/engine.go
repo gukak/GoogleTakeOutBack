@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -234,9 +235,10 @@ func discoverIncoming(dir string) ([]string, error) {
 }
 
 func shouldSkip(env *app.Env, e *zipx.Entry) bool {
-	base := filepath.Base(e.Name)
+	// Use path (forward slashes) because ZIP entry names always use '/'.
+	base := path.Base(e.Name)
 	for _, pattern := range env.Policy.SkipNames {
-		if matched, _ := filepath.Match(pattern, base); matched {
+		if matched, _ := path.Match(pattern, base); matched {
 			return true
 		}
 	}
