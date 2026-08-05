@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.4] - 2026-08-04
+
+### Fixed
+- Replaced the `archive/zip` fallback with a **local-header scan** that does
+  not depend on the standard library's stricter parser. This handles archives
+  that Mint/unzip can open but Go cannot.
+- A file that cannot be appended (even after fallback) is now logged as a
+  warning instead of aborting the entire sync.
+
 ## [v0.3.3] - 2026-08-04
 
 ### Fixed

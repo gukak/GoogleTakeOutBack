@@ -90,9 +90,8 @@ func Sync(env *app.Env, args []string) error {
 				e.Name = app.InsertVersionSuffix(head.Name, next)
 				written, err := zipx.CopyRawEntry(dst, src.File, e)
 				if err != nil {
-					_ = dst.Close()
-					_ = src.Close()
-					return fmt.Errorf("append %s: %w", e.Name, err)
+					env.Logf("warn", "cannot append %s: %v", e.Name, err)
+					continue
 				}
 				report.BytesAppended += int64(written.CompressedSize)
 				allEntries = append(allEntries, written)
@@ -103,9 +102,8 @@ func Sync(env *app.Env, args []string) error {
 			} else {
 				written, err := zipx.CopyRawEntry(dst, src.File, e)
 				if err != nil {
-					_ = dst.Close()
-					_ = src.Close()
-					return fmt.Errorf("append %s: %w", e.Name, err)
+					env.Logf("warn", "cannot append %s: %v", e.Name, err)
+					continue
 				}
 				report.BytesAppended += int64(written.CompressedSize)
 				allEntries = append(allEntries, written)
