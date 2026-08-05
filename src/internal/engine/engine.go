@@ -35,6 +35,29 @@ func Sync(env *app.Env, args []string) error {
 	start := time.Now()
 	env.Logf("info", "starting sync, version=%s", app.Version)
 
+	incomingDir := env.Incoming
+	i := 0
+	for i < len(args) {
+		if args[i] == "--incoming" && i+1 < len(args) {
+			incomingDir = args[i+1]
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(args[i], "--incoming=") {
+			incomingDir = strings.TrimPrefix(args[i], "--incoming=")
+			i++
+			continue
+		}
+		i++
+	}
+
+	if incomingDir == "" {
+		return fmt.Errorf("incoming directory cannot be empty")
+	}
+	if _, err := os.Stat(incomingDir); err != nil {
+		return fmt.Errorf("cannot access incoming directory %s: %w", incomingDir, err)
+	}
+
 	lockFile, err := acquireLock(env.LockPath)
 	if err != nil {
 		return err
@@ -52,11 +75,14 @@ func Sync(env *app.Env, args []string) error {
 		return err
 	}
 
-	incomingFiles, err := discoverIncoming(env.Incoming)
+	incomingFiles, err := discoverIncoming(incomingDir)
 	if err != nil {
 		return err
 	}
 	report.ArchivesScanned = len(incomingFiles)
+	if incomingDir != env.Incoming {
+		env.Logf("info", "using custom incoming directory: %s", incomingDir)
+	}
 
 	dst, err := zipx.OpenOrCreate(env.ArchiveZip)
 	if err != nil {

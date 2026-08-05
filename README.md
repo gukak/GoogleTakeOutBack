@@ -54,6 +54,12 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.0/install.
 
 Your consolidated archive lives at `Archive/Consolidated.zip`.
 
+You can also sync from a different source folder:
+
+```bash
+./TakeOutBack.sh --incoming /path/to/other/zips
+```
+
 ## Commands
 
 | Command | Description |

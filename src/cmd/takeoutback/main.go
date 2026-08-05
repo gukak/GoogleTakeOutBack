@@ -16,6 +16,7 @@ import (
 
 func main() {
 	rootFlag := ""
+	incomingFlag := ""
 	var args []string
 	i := 0
 	for i < len(os.Args[1:]) {
@@ -27,6 +28,16 @@ func main() {
 		}
 		if strings.HasPrefix(a, "--root=") {
 			rootFlag = strings.TrimPrefix(a, "--root=")
+			i++
+			continue
+		}
+		if a == "--incoming" && i+1 < len(os.Args[1:]) {
+			incomingFlag = os.Args[2+i]
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(a, "--incoming=") {
+			incomingFlag = strings.TrimPrefix(a, "--incoming=")
 			i++
 			continue
 		}
@@ -48,6 +59,9 @@ func main() {
 		if len(args) > 1 {
 			sub = args[1:]
 		}
+	}
+	if incomingFlag != "" {
+		sub = append([]string{"--incoming", incomingFlag}, sub...)
 	}
 
 	var runErr error
@@ -88,14 +102,15 @@ Commands:
   sync      Consolidate new Takeout ZIPs (default)
   verify    Check archive integrity
   stats     Show archive statistics
-  compact   Rewrite archive to remove dead directory blocks
+  compact   Rewrite archive to remove dead central directory blocks
   update    Update the binary from GitHub Releases
   menu      Interactive menu
   --version Print version
   --help    Show this help
 
 Options:
-  --root PATH  Use PATH as the project root instead of auto-detecting`)
+  --root PATH       Use PATH as the project root instead of auto-detecting
+  --incoming PATH   Use PATH as the source folder instead of Incoming/`) 
 }
 
 func menuLoop(env *app.Env) error {

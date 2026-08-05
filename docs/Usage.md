@@ -8,8 +8,19 @@
    - Linux: `./TakeOutBack.sh`
    - Windows: `TakeOutBack.bat`
 4. Read the summary printed to the console.
-5. Optionally delete the original Takeout ZIP from `Incoming/` if you want to
-   free space. TakeOutBack never deletes incoming files automatically.
+
+If you want to import from a different folder than `Incoming/`, use the
+`--incoming` option:
+
+```bash
+./TakeOutBack.sh --incoming /path/to/other/zips
+./TakeOutBack.sh sync --incoming /path/to/other/zips
+./TakeOutBack.sh --incoming=/path/to/other/zips
+```
+
+5. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
+   folder) if you want to free space. TakeOutBack never deletes incoming files
+   automatically.
 
 ## Understanding the Summary
 

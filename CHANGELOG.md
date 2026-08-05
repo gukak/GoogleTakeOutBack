@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.5] - 2026-08-04
+
+### Added
+- New `--incoming PATH` / `--incoming=PATH` option to import Takeout ZIP files
+  from any directory instead of the default `Incoming/` folder.
+
 ## [v0.3.4] - 2026-08-04
 
 ### Fixed
