@@ -85,6 +85,8 @@ func Sync(env *app.Env, args []string) error {
 		env.Logf("info", "using custom incoming directory: %s", incomingDir)
 	}
 
+	printArchiveList(incomingFiles)
+
 	dst, err := zipx.OpenOrCreate(env.ArchiveZip)
 	if err != nil {
 		return err
@@ -100,9 +102,12 @@ func Sync(env *app.Env, args []string) error {
 		src, err := zipx.OpenFileRead(path)
 		if err != nil {
 			env.Logf("warn", "skipping invalid archive %s: %v", path, err)
+			fmt.Printf("Skipping invalid archive: %s\n", filepath.Base(path))
 			continue
 		}
-		for _, e := range src.Entries {
+		bar := newProgressBar(len(src.Entries), filepath.Base(path))
+		for i, e := range src.Entries {
+			bar.update(i)
 			report.FilesScanned++
 			if shouldSkip(env, e) {
 				continue
@@ -140,6 +145,7 @@ func Sync(env *app.Env, args []string) error {
 				env.Logf("info", "appended %s (%d bytes compressed)", written.Name, written.CompressedSize)
 			}
 		}
+		bar.finish()
 		_ = src.Close()
 	}
 

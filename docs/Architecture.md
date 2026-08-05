@@ -1,8 +1,7 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Draft v0.1** — architectural review, risk analysis, alternative comparison and recommendation.
-> Authored before any implementation, as required by the project specification.
-> This document is the single source of truth for the design. Code is NOT written until this is approved.
+> Status: **Implemented v0.3.7** — the design described here is implemented and
+> released. This document is updated to reflect the current behavior.
 
 ---
 
@@ -90,11 +89,9 @@ are ever required on the host.**
 - Cross-platform file handles, fsync (`os.File.Sync()`), and os-specific safe rename (`os.Rename` is atomic on both Win10+ and POSIX) are in stdlib.
 - Standard library only: zero third-party dependencies at runtime. This is the single biggest factor in **multi-year maintainability**.
 
-> **Open question for maintainer:** Go is recommended because the portability,
-> reliability and "no-runtime" constraints dominate. If the maintainer prefers
-> to lean on existing Python expertise, the design still works with an embedded
-> CPython runtime; the rest of this document is largely language-independent.
-> This choice must be confirmed before implementation begins (see §14).
+> **Decision:** Go static binary. The portability, reliability and "no-runtime"
+> constraints dominate. The implementation is a single stdlib-only Go binary per
+> platform. The decision is recorded in §14.
 
 ### 3.2 Storage model — **single append-only ZIP archive**
 
@@ -422,6 +419,7 @@ on its own, so the file body is **self-describing**.
    - For each candidate, probe by opening with `zip.OpenReader` (Go) — if it
      fails to read a central directory, log a **warning** and skip (don't crash
      on a half-downloaded Takeout). This is the validity test.
+   - Print a numbered list of the archives that will be processed.
 
 3. **Build incoming index per archive**
    - For each valid Takeout ZIP `T`:
@@ -430,7 +428,9 @@ on its own, so the file body is **self-describing**.
        `index.html` of the export, `.*.json` metadata sidecars) — the maintainer
        decides policy via `config/policy.json` (default: keep all files; the
        filter is OPT-IN and OFF by default to honor "preserve everything").
-     - Build `IndexIncoming_T` = `normalized_path → (size, crc32, method, cd_offset_in_T, compressed_size_in_T, flags)`.
+      - Build `IndexIncoming_T` = `normalized_path → (size, crc32, method, cd_offset_in_T, compressed_size_in_T, flags)`.
+      - Render a per-archive progress bar on the console while entries are
+        processed.
 
 4. **Diff & classify**
    - For each entry `(p, s, c)` in `IndexIncoming_T`:
@@ -636,11 +636,15 @@ To guarantee a Linux-produced archive opens on Windows and vice-versa:
     same path (first-wins controls the stored case); future MODed versions get
     `Foo.jpg__v2`, etc. This prevents subtle, surprising Windows-Linux divergent
     history. It's a documented, conservative choice.
-- **Launchers** are platform-specific thin wrappers:
-  - `TakeOutBack.sh` — `#!/usr/bin/env bash`; resolves its own dir; calls
-    `<dir>/TakeOutBack/tools/linux/takeoutback "$@"`.
-  - `TakeOutBack.bat` — calls `%~dp0TakeOutBack\tools\windows\takeoutback.exe %*`.
-  Identical CLI behavior underneath; both use forward-slash-agnostic Go.
+   - **Launchers** are platform-specific thin wrappers:
+   - `TakeOutBack.sh` — `#!/usr/bin/env bash`; resolves its own dir; calls
+     `<dir>/TakeOutBack/tools/linux/takeoutback "$@"`.
+   - `TakeOutBack.bat` — resolves its own directory and calls
+     `TakeOutBack\tools\windows\takeoutback.exe --root "<dir>." %*`. The trailing
+     `.` is appended to the directory so that `"F:\"` (which would escape the
+     closing quote in batch) becomes `"F:\."`, a valid path that Go normalizes
+     back to `F:\`.
+   Identical CLI behavior underneath; both use forward-slash-agnostic Go.
 - **No backslashes ever** in stored ZIP data; the Go engine never constructs
   ZIP paths from OS-specific separators.
 
@@ -816,7 +820,27 @@ bash`/`| iex` also a self-repair / upgrade path.
   files scanned, new files, modified files, skipped files, bytes appended,
   warnings, errors, recovery-actions-taken.
 
-### 12.2 Console summary
+### 12.2 Live progress and console summary
+
+During sync the console shows:
+
+1. A numbered list of archives about to be processed.
+2. A per-archive ASCII progress bar redrawn in place (`\r`) showing entries
+   processed and percentage.
+
+Example:
+
+```
+Archives to process: 4
+  1. takeout-2025-001-of-001.zip
+  2. takeout-2025-001-of-002.zip
+  3. takeout-2025-001-of-003.zip
+  4. takeout-2025-001-of-004.zip
+  [===============================>] takeout-2025-001-of-001.zip 1542/1542 (100%)
+  [===========>                  ] takeout-2025-001-of-002.zip  623/1823 (34%)
+```
+
+When the run completes, the final summary is printed:
 
 ```
 TakeOutBack vX.Y.Z
@@ -913,41 +937,24 @@ Keep-a-Changelog format. Top-level sections per version:
 
 ---
 
-## 14. Open Questions for the Maintainer (decide before code)
+## 14. Decisions Log
 
-1. **Repo config** (you indicated already it's "not yet created"):
-   - Owner / repo name on GitHub?
-   - Public or private?
-   - Branch strategy to adopt (recommendation: `main` + short feature branches).
-   - HTTPS or SSH for the maintainer's own push access?
-   The design does not block on these but the installer URLs need `<owner>/<repo>`
-   once the repo exists. We will set them in `settings.json` and the install
-   scripts via a single `OWNER_REPO` constant; never hard-coded elsewhere.
+These decisions were made during implementation and are reflected in the
+released code:
 
-2. **Runtime choice (the critical fork)**:
-   - **Option A — Go static binary (recommended).** Maximal portability, no
-     runtime, stdlib `archive/zip`, single-static-binary per OS, lowest
-     long-term-maintenance burden. The brief lists Python expertise, but the
-     brief's *technical constraints* (no runtime, no libs, single binary, years
-     of reliable operation) fit Go better. The algorithms in this document are
-     language-agnostic; the choice mainly affects implementation idioms.
-   - **Option B — Embedded CPython.** Matches listed Python expertise; usable
-     offline if we bundle `python-zipfile` + the embeddable distribution per
-     platform. Robotically equivalent functionally, *heavier footprint* and
-     harder to keep robustly offline over years.
-
-   Unless you say otherwise I will proceed with **Option A (Go)**. (If you want
-     Option B, the architecture is unaffected; only the engineering tooling,
-     bundling and update mechanism details change.)
-
-3. **Policy defaults** (non-blocking, but configured before first release):
+1. **Repository**: `gukak/GoogleTakeOutBack` on GitHub, public, `main` branch
+   with short-lived feature branches, HTTPS push.
+2. **Runtime**: **Go static binary (Option A)** — single binary per OS, stdlib
+   only, cross-compiled from one source tree.
+3. **Policy defaults** (all configurable in `TakeOutBack/config/policy.json`):
    - Keep Google Takeout's metadata HTML/JSON sidecars (default: yes — keep all).
    - Drop incoming Takeout ZIPs after a verified sync (default: no — keep).
    - Re-deflate `Store` entries to save space (default: no).
-   - Auto-compact on a threshold of dead-CD bytes (default: none, opt-in).
-
-4. **Asset signing**: detached GPG signature of binaries (optional). Default:
-   off initially.
+   - Auto-compact on a threshold of dead-CD bytes (default: 0, opt-in).
+4. **Asset signing**: not implemented; SHA-256 checksums are used for all
+   release assets and verified by the installer and updater.
+5. **Windows launcher quoting**: the batch file passes `--root "<dir>."` to
+   avoid the `"F:\\"` quote-escape bug in `cmd.exe`.
 
 ---
 

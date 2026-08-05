@@ -7,7 +7,9 @@
 3. Run the launcher:
    - Linux: `./TakeOutBack.sh`
    - Windows: `TakeOutBack.bat`
-4. Read the summary printed to the console.
+4. Watch the live progress: TakeOutBack lists the archives it found, then shows
+   a progress bar for each archive while it is being processed.
+5. Read the final summary printed to the console.
 
 If you want to import from a different folder than `Incoming/`, use the
 `--incoming` option:
@@ -18,16 +20,36 @@ If you want to import from a different folder than `Incoming/`, use the
 ./TakeOutBack.sh --incoming=/path/to/other/zips
 ```
 
-5. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
+6. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
    folder) if you want to free space. TakeOutBack never deletes incoming files
    automatically.
+
+## Live Progress
+
+While a sync is running, TakeOutBack prints the list of archives it will
+process, then redraws a progress bar for each archive on the same terminal line:
+
+```
+Archives to process: 4
+  1. takeout-2025-001-of-001.zip
+  2. takeout-2025-001-of-002.zip
+  3. takeout-2025-001-of-003.zip
+  4. takeout-2025-001-of-004.zip
+  [===============================>] takeout-2025-001-of-001.zip 1542/1542 (100%)
+  [===========>                  ] takeout-2025-001-of-002.zip  623/1823 (34%)
+```
+
+The progress bar is rendered with carriage returns (`\r`) so it updates in
+place in any terminal (Windows Command Prompt, PowerShell, Linux console). If
+stdout is redirected to a file or pipe, each update appears on its own line,
+which is still readable.
 
 ## Understanding the Summary
 
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.3.0
+TakeOutBack v0.3.7
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523

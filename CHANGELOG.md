@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.7] - 2026-08-04
+
+### Added
+- Live sync progress: before processing, TakeOutBack prints a numbered list of
+  archives to process, then redraws a per-archive ASCII progress bar showing the
+  current entry count and percentage.
+
+### Changed
+- Updated all documentation (`README.md`, `docs/*.md`) to describe the live
+  progress output and the Windows path-quoting fix.
+
 ## [v0.3.6] - 2026-08-04
 
 ### Fixed

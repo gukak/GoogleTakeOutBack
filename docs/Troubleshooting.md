@@ -92,6 +92,23 @@ tag. Ensure:
 - The newer release is actually published (not a draft).
 - You have network connectivity.
 
+### Windows: "cannot create directory F:\\"Incoming"
+
+This was caused by the batch launcher passing `--root "F:\"` where the trailing
+backslash escaped the closing quote. It is fixed in v0.3.6 and later. Reinstall
+with the latest installer:
+
+```powershell
+irm https://github.com/OWNER/REPO/releases/download/v0.3.7/install.ps1 | iex
+```
+
+### Progress bar appears on many lines instead of one
+
+The progress bar uses carriage returns (`\r`) to redraw in place. This is the
+expected behavior when stdout is captured, redirected to a file or viewed in a
+non-terminal environment. In a normal terminal window the bar updates on a
+single line.
+
 ### Windows Defender or antivirus warns about the binary
 
 Static Go binaries are sometimes flagged by heuristics. The binary is built from

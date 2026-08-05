@@ -30,7 +30,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.0/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.7/install.sh | bash
 ```
 
 ### Install on Windows
@@ -38,11 +38,11 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.0/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.0/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.7/install.ps1 | iex
 ```
 
-> Replace `gukak/GoogleTakeOutBack` with your real GitHub owner/repository before
-> the first release. See [Installation.md](docs/Installation.md) for details.
+> See [Installation.md](docs/Installation.md) for more options (force install,
+> specific version, fetch only the current platform binary).
 
 ### Use
 
@@ -50,7 +50,9 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.0/install.
 2. Run the launcher:
    - Linux: `./TakeOutBack.sh`
    - Windows: `TakeOutBack.bat`
-3. Repeat whenever you have a new Takeout export.
+3. Watch the progress: each archive is listed, then a progress bar shows the
+   files being processed in real time.
+4. Repeat whenever you have a new Takeout export.
 
 Your consolidated archive lives at `Archive/Consolidated.zip`.
 
@@ -58,6 +60,32 @@ You can also sync from a different source folder:
 
 ```bash
 ./TakeOutBack.sh --incoming /path/to/other/zips
+```
+
+### Live progress
+
+During a sync you will see the list of archives and a per-archive progress bar:
+
+```
+Archives to process: 2
+  1. takeout-2025-001.zip
+  2. takeout-2025-002.zip
+  [==============================] takeout-2025-001.zip 1542/1542 (100%)
+  [===========>                  ] takeout-2025-002.zip  623/1823 (34%)
+```
+
+When the run finishes, the usual summary is printed:
+
+```
+TakeOutBack v0.3.7
+Archives scanned : 2
+Files scanned    : 3365
+New files        : 142
+Modified files   : 8
+Skipped files    : 3215
+Bytes appended   : 1.42 GiB
+Duration         : 00:02:14
+Status           : OK
 ```
 
 ## Commands

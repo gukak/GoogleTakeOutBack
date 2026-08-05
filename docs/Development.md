@@ -78,10 +78,13 @@ make build-all
 
 1. Update `src/internal/app/app.go` `Version` and `TakeOutBack/config/VERSION`.
 2. Update `CHANGELOG.md`.
-3. Commit with a conventional commit message, e.g. `feat: release v0.3.0`.
-4. Tag: `git tag -a v0.3.0 -m "Release v0.3.0"`
-5. Push the tag: `git push origin v0.3.0`
-6. The GitHub Actions `release.yml` workflow builds binaries, generates
+3. Update documentation (`README.md`, `docs/*.md`) and the installer scripts
+   (`TakeOutBack/scripts/install.sh`, `TakeOutBack/scripts/install.ps1`) to
+   reference the new version.
+4. Commit with a conventional commit message, e.g. `feat: release v0.3.7`.
+5. Tag: `git tag -a v0.3.7 -m "Release v0.3.7"`
+6. Push the tag: `git push origin v0.3.7`
+7. The GitHub Actions `release.yml` workflow builds binaries, generates
    checksums, creates a GitHub Release and uploads the assets.
 
 ## Git Workflow
@@ -105,7 +108,14 @@ Before the first real release, change the placeholder owner/repository in:
 1. Implement the command in `src/internal/engine/` or a new package.
 2. Add the case to `src/cmd/takeoutback/main.go`.
 3. Add the command to the interactive menu if appropriate.
-4. Update `README.md`, `docs/Usage.md` and `--help` text.
+4. Update `README.md`, `docs/Usage.md`, `docs/Architecture.md` and `--help` text.
+
+## UI Guidelines
+
+- Keep output human-readable and informative.
+- During long operations (e.g. sync), show live progress: list the work to be
+  done, then redraw a progress bar on the same terminal line with `\r`.
+- Always end with a clear summary (counts, duration, status).
 
 ## Security Notes
 
