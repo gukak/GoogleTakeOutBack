@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.1] - 2026-08-04
+
+### Fixed
+- Panic when running `TakeOutBack.sh` with no subcommand (`slice bounds out of range [1:0]`).
+  The argument parser now safely handles an empty argument list.
+
 ## [v0.3.0] - 2026-08-04
 
 ### Added

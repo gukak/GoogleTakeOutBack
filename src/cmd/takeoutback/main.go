@@ -42,10 +42,13 @@ func main() {
 	defer env.Close()
 
 	cmd := "sync"
+	var sub []string
 	if len(args) > 0 {
 		cmd = args[0]
+		if len(args) > 1 {
+			sub = args[1:]
+		}
 	}
-	sub := args[1:]
 
 	var runErr error
 	switch cmd {
