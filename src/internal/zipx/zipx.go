@@ -5,6 +5,7 @@
 package zipx
 
 import (
+	archivezip "archive/zip"
 	"bufio"
 	"encoding/binary"
 	"fmt"
@@ -293,6 +294,18 @@ func ReadLocalHeader(f *os.File, off int64) (*Entry, int64, error) {
 // CopyRawEntry copies the compressed payload from src to dst without
 // decompressing. It returns the destination entry with LocalHeaderOff filled in.
 func CopyRawEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
+	h, err := copyRawEntry(dst, src, e)
+	if err == nil {
+		return h, nil
+	}
+	// Fallback: some archives (e.g. large Google Takeout zips) may have central
+	// directory offsets that our raw parser cannot reconcile. In that case we
+	// re-read the entry through the standard library and store it uncompressed.
+	// This preserves the content, not the original compressed bytes.
+	return copyEntryFallback(dst, src, e)
+}
+
+func copyRawEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
 	h, dataOff, err := ReadLocalHeader(src, int64(e.LocalHeaderOff))
 	if err != nil {
 		return nil, fmt.Errorf("read local header for %s: %w", e.Name, err)
@@ -325,6 +338,78 @@ func CopyRawEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
 		return nil, err
 	}
 	return h, nil
+}
+
+func copyEntryFallback(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
+	zr, err := archivezip.OpenReader(src.Name())
+	if err != nil {
+		return nil, fmt.Errorf("fallback open %s: %w", e.Name, err)
+	}
+	defer zr.Close()
+
+	var srcFile *archivezip.File
+	for _, f := range zr.File {
+		if f.Name == e.Name {
+			srcFile = f
+			break
+		}
+	}
+	if srcFile == nil {
+		return nil, fmt.Errorf("fallback: entry %s not found in archive", e.Name)
+	}
+
+	rc, err := srcFile.Open()
+	if err != nil {
+		return nil, fmt.Errorf("fallback open entry %s: %w", e.Name, err)
+	}
+	defer rc.Close()
+
+	tempDir := filepath.Join(filepath.Dir(dst.Name()), "..", "temp")
+	_ = os.MkdirAll(tempDir, 0755)
+	tmp, err := os.CreateTemp(tempDir, "tob-fallback-*")
+	if err != nil {
+		return nil, fmt.Errorf("fallback temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	h := crc32.NewIEEE()
+	w := io.MultiWriter(tmp, h)
+	n, err := io.Copy(w, rc)
+	if err != nil {
+		return nil, fmt.Errorf("fallback copy %s: %w", e.Name, err)
+	}
+	if err := rc.Close(); err != nil {
+		return nil, err
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	cur, err := dst.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, err
+	}
+	out := &Entry{
+		Name:             e.Name,
+		Method:           MethodStore,
+		CRC32:            h.Sum32(),
+		CompressedSize:   uint64(n),
+		UncompressedSize: uint64(n),
+		ModifiedTime:     e.ModifiedTime,
+		ModifiedDate:     e.ModifiedDate,
+		Flags:            FlagUTF8,
+		ExternalAttr:     e.ExternalAttr,
+		CreatorVersion:   e.CreatorVersion,
+		LocalHeaderOff:   uint64(cur),
+	}
+	if err := WriteLocalHeader(dst, out); err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(dst, tmp); err != nil {
+		return nil, fmt.Errorf("fallback write %s: %w", e.Name, err)
+	}
+	return out, nil
 }
 
 // WriteLocalHeader writes a local file header to w.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.3] - 2026-08-04
+
+### Fixed
+- Added a fallback path when copying an incoming entry by raw compressed stream
+  fails. Some large Google Takeout archives report local-header offsets that
+  cannot be used directly; the engine now re-reads the entry through the
+  standard library and stores it uncompressed. Content is preserved.
+
 ## [v0.3.2] - 2026-08-04
 
 ### Fixed
