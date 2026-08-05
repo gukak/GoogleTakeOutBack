@@ -66,6 +66,15 @@ func Sync(env *app.Env, args []string) error {
 	}
 	defer releaseLock(lockFile)
 
+	runDir, err := makeTempRunDir(env.TempDir)
+	if err != nil {
+		return fmt.Errorf("cannot create temp run directory: %w", err)
+	}
+	defer os.RemoveAll(runDir)
+
+	// Ensure Archive/ only contains final Consolidated and Added zips.
+	cleanupArchiveTempFiles(env.Archive)
+
 	report := &Report{}
 
 	currentArchive, err := env.CurrentArchive()
@@ -83,7 +92,7 @@ func Sync(env *app.Env, args []string) error {
 		}
 	}
 
-	if err := recoverArchive(env, currentArchive); err != nil {
+	if err := recoverArchive(env, currentArchive, runDir); err != nil {
 		return fmt.Errorf("recovery failed: %w", err)
 	}
 
@@ -103,13 +112,13 @@ func Sync(env *app.Env, args []string) error {
 
 	printArchiveList(incomingFiles)
 
-	ts := time.Now().UTC()
+	ts := time.Now()
 	newArchiveName := timestampName("Consolidated", ts)
 	addedArchiveName := timestampName("Added", ts)
 	newArchivePath := uniqueArchivePath(env.Archive, newArchiveName)
 	addedArchivePath := uniqueArchivePath(env.Archive, addedArchiveName)
-	newArchiveTmp := newArchivePath + ".tmp"
-	addedArchiveTmp := addedArchivePath + ".tmp"
+	newArchiveTmp := filepath.Join(runDir, newArchiveName+".tmp")
+	addedArchiveTmp := filepath.Join(runDir, addedArchiveName+".tmp")
 
 	newDst, err := zipx.OpenOrCreate(newArchiveTmp)
 	if err != nil {
@@ -321,7 +330,7 @@ func discoverIncoming(dir string) ([]string, error) {
 }
 
 func timestampName(prefix string, t time.Time) string {
-	return fmt.Sprintf("%s-%s.zip", prefix, t.UTC().Format("20060102-150405.000"))
+	return fmt.Sprintf("%s-%s.zip", prefix, t.Local().Format("20060102-150405.000"))
 }
 
 func uniqueArchivePath(dir, name string) string {
@@ -337,6 +346,44 @@ func uniqueArchivePath(dir, name string) string {
 		}
 	}
 	return filepath.Join(dir, name)
+}
+
+// makeTempRunDir creates a fresh per-execution temp directory under parent and
+// removes any leftover run-* directories from previous interrupted runs.
+func makeTempRunDir(parent string) (string, error) {
+	entries, _ := os.ReadDir(parent)
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "run-") {
+			_ = os.RemoveAll(filepath.Join(parent, e.Name()))
+		}
+	}
+	base := filepath.Join(parent, fmt.Sprintf("run-%s", time.Now().Local().Format("20060102-150405.000")))
+	runDir := base
+	for i := 1; i < 1000; i++ {
+		if _, err := os.Stat(runDir); os.IsNotExist(err) {
+			break
+		}
+		runDir = fmt.Sprintf("%s_%d", base, i)
+	}
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		return "", err
+	}
+	return runDir, nil
+}
+
+// cleanupArchiveTempFiles removes any leftover temporary files from the Archive
+// directory. After cleanup only final Consolidated and Added zips should remain.
+func cleanupArchiveTempFiles(dir string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".rebuild") || strings.HasSuffix(name, ".compact") {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
 }
 
 func backupArchive(env *app.Env, src string) error {
@@ -551,7 +598,9 @@ func formatDuration(d time.Duration) string {
 }
 
 // recoverArchive validates and, if necessary, repairs the consolidated archive.
-func recoverArchive(env *app.Env, archivePath string) error {
+// tempDir is a per-execution temporary directory; any rebuilt archive is written
+// there and then renamed over archivePath.
+func recoverArchive(env *app.Env, archivePath, tempDir string) error {
 	if archivePath == "" {
 		return nil
 	}
@@ -609,7 +658,8 @@ func recoverArchive(env *app.Env, archivePath string) error {
 		return os.Truncate(archivePath, 0)
 	}
 
-	dst, err := zipx.OpenOrCreate(archivePath + ".rebuild")
+	rebuildTmp := filepath.Join(tempDir, filepath.Base(archivePath)+".rebuild")
+	dst, err := zipx.OpenOrCreate(rebuildTmp)
 	if err != nil {
 		return err
 	}
@@ -637,7 +687,7 @@ func recoverArchive(env *app.Env, archivePath string) error {
 	if err := dst.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(archivePath+".rebuild", archivePath); err != nil {
+	if err := os.Rename(rebuildTmp, archivePath); err != nil {
 		return err
 	}
 	return nil
@@ -826,13 +876,19 @@ func Compact(env *app.Env, args []string) error {
 		return nil
 	}
 
+	runDir, err := makeTempRunDir(env.TempDir)
+	if err != nil {
+		return fmt.Errorf("cannot create temp run directory: %w", err)
+	}
+	defer os.RemoveAll(runDir)
+
 	fr, err := zipx.OpenFileRead(archivePath)
 	if err != nil {
 		return err
 	}
 	defer fr.Close()
 
-	tmp := archivePath + ".compact"
+	tmp := filepath.Join(runDir, filepath.Base(archivePath)+".compact")
 	dst, err := zipx.OpenOrCreate(tmp)
 	if err != nil {
 		return err

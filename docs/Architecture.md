@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.3.8** — the design described here is implemented and
+> Status: **Implemented v0.3.9** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -411,7 +411,10 @@ on its own, so the file body is **self-describing**.
      `TakeOutBack/{tools,config,logs,temp}` exist; create missing.
    - Determine the current consolidated archive by scanning `Archive/` for the
      lexicographically greatest `Consolidated-*.zip` name (timestamp format is
-     sortable).
+     sortable; timestamps are in local time).
+   - Remove any leftover per-execution temp directories `TakeOutBack/temp/run-*`
+     from a previously interrupted run.
+   - Remove any leftover `*.tmp`, `*.rebuild` or `*.compact` files in `Archive/`.
    - Acquire a cross-run lockfile `Archive/.consolidated.lock`. If it exists and
      the recorded PID is alive, abort with a clear message; otherwise treat it as
      stale and remove it.
@@ -434,7 +437,8 @@ on its own, so the file body is **self-describing**.
    - Print a numbered list of the archives that will be processed.
 
 6. **Build new archives**
-   - Create two temporary files in `Archive/`:
+   - Create a fresh per-execution directory `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/`.
+   - Create two temporary files inside that directory:
      - `Consolidated-YYYYMMDD-HHMMSS.mmm.zip.tmp`
      - `Added-YYYYMMDD-HHMMSS.mmm.zip.tmp`
    - Copy all existing entries from the current archive into the new consolidated
@@ -455,9 +459,10 @@ on its own, so the file body is **self-describing**.
    - Remove the previous consolidated archive from `Archive/` (it is already in
      `Backup/`).
 
-8. **Finalize state**
+8. **Finalize state and cleanup**
    - Write `Archive/state.json` and `Archive/cd.bak` atomically.
    - Release the lockfile.
+   - Remove the per-execution temp directory.
 
 9. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
    including the paths of the new consolidated and added archives.
@@ -666,7 +671,8 @@ demand; it is too expensive to do on every sync.
     │   │   └── takeoutback           # native binary (Linux x86_64)
     │   └── windows/
     │       └── takeoutback.exe       # native binary (Windows x86_64)
-    ├── temp/                         # transient scratch (compaction, extract probes)
+    ├── temp/                         # parent temp directory
+    │   └── run-YYYYMMDD-HHMMSS.mmm/  # per-execution temp directory
     ├── logs/
     │   └── YYYY-MM-DD.log
     ├── config/
@@ -676,12 +682,11 @@ demand; it is too expensive to do on every sync.
     ├── docs/
     │   ├── README, Architecture.md, Installation.md, Usage.md,
     │   ├── Development.md, Troubleshooting.md
-    ├── scripts/                      # operational scripts (e.g. self-update)
-    │   ├── install.sh
-    │   ├── install.ps1
-    │   ├── self-update.sh
-    │   └── self-update.ps1
-    └── tools/<platform>/.tmp/        # download staging used during updates
+    └── scripts/                      # operational scripts (e.g. self-update)
+        ├── install.sh
+        ├── install.ps1
+        ├── self-update.sh
+        └── self-update.ps1
 ```
 
 User-facing surface is **only** `TakeOutBack.sh`, `TakeOutBack.bat`, `Incoming/`,

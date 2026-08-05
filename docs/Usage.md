@@ -13,15 +13,21 @@
 
 TakeOutBack writes the following files:
 
-- `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — the current consolidated archive.
+- `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — the current consolidated archive
+  (timestamps are in the system's local time).
 - `Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` — only the files added during this run.
 - `Backup/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — a copy of the previous consolidated
   archive, kept before it is replaced. The last 5 backups are retained.
 
+All temporary work is done inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/`. That
+folder is removed at the end of a successful run and any leftover `run-*` folders
+from an interrupted run are removed at the start of the next run. As a result,
+`Archive/` only contains final `Consolidated-*.zip`, `Added-*.zip` and the tiny
+`state.json` / `cd.bak` sidecars.
+
 If a sync is interrupted (Ctrl+C, power loss, drive removal), the next run will
 automatically detect the stale lock and resume. Your previous consolidated archive
-is untouched because TakeOutBack always builds the new archive in a temporary file
-and only replaces the old one at the very end.
+is untouched because TakeOutBack never modifies it in place.
 
 If you want to import from a different folder than `Incoming/`, use the
 `--incoming` option:
@@ -61,7 +67,7 @@ which is still readable.
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.3.8
+TakeOutBack v0.3.9
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523

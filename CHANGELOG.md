@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.9] - 2026-08-05
+
+### Added
+- Per-execution temporary directory under `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/`.
+  All scratch work now happens there instead of inside `Archive/`.
+- Automatic cleanup of leftover `run-*` directories from interrupted runs and
+  leftover `*.tmp` / `*.rebuild` / `*.compact` files in `Archive/` at startup.
+- The per-execution temp directory is removed after a successful run.
+
+### Changed
+- Archive timestamps now use the system's local time instead of UTC.
+- The temporary consolidated and added archives are written under the
+  per-execution temp directory and renamed into `Archive/` only at the end.
+
+### Fixed
+- `Archive/` no longer accumulates partial `.tmp` files; only final
+  `Consolidated-*.zip`, `Added-*.zip`, and sidecar files remain.
+
 ## [v0.3.8] - 2026-08-04
 
 ### Added

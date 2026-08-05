@@ -32,7 +32,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.8/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.9/install.sh | bash
 ```
 
 ### Install on Windows
@@ -40,7 +40,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.8/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.8/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.9/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -57,9 +57,13 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.8/install.
 4. Repeat whenever you have a new Takeout export.
 
 Your consolidated archive lives at `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`
-(the timestamp is updated on every sync). A companion `Added-YYYYMMDD-HHMMSS.mmm.zip`
-contains only the files imported during that sync, and the previous consolidated
-archive is copied to `Backup/` before being replaced.
+(the local timestamp is updated on every sync). A companion
+`Added-YYYYMMDD-HHMMSS.mmm.zip` contains only the files imported during that sync,
+and the previous consolidated archive is copied to `Backup/` before being replaced.
+
+All temporary work happens inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` and
+is cleaned up automatically, so `Archive/` only ever contains the final
+`Consolidated-*.zip`, `Added-*.zip`, and tiny sidecar files.
 
 You can also sync from a different source folder:
 
@@ -83,7 +87,7 @@ When the run finishes, the usual summary is printed, including the paths to
 both the new consolidated archive and the added-only archive:
 
 ```
-TakeOutBack v0.3.8
+TakeOutBack v0.3.9
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142
