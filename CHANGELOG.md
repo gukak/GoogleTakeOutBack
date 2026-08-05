@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.8] - 2026-08-04
+
+### Added
+- `Backup/` directory: the previous consolidated archive is copied here before
+  each sync is allowed to replace it. The last 5 backups are retained.
+- Timestamped archive names: consolidated archives are now named
+  `Consolidated-YYYYMMDD-HHMMSS.mmm.zip` and a companion `Added-*.zip` is created
+  containing only the files imported during that sync.
+- Stale lock detection: if a sync is interrupted (Ctrl+C, power loss, drive
+  removal), the next run detects the abandoned `Archive/.consolidated.lock` and
+  resumes safely.
+
+### Changed
+- The consolidated archive is now rebuilt from a temporary file on every sync.
+  The previous archive is never modified in place, making interruption safe.
+- Updated all documentation to describe the new archive layout, backup
+  behavior, stale-lock recovery and timestamped output.
+
+### Fixed
+- Removed `Archive/Consolidated.zip` and `Archive/Consolidated.zip.state.json`
+  in favor of `Archive/Consolidated-*.zip` and `Archive/state.json`.
+
 ## [v0.3.7] - 2026-08-04
 
 ### Added

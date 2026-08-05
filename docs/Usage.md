@@ -11,6 +11,18 @@
    a progress bar for each archive while it is being processed.
 5. Read the final summary printed to the console.
 
+TakeOutBack writes the following files:
+
+- `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — the current consolidated archive.
+- `Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` — only the files added during this run.
+- `Backup/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — a copy of the previous consolidated
+  archive, kept before it is replaced. The last 5 backups are retained.
+
+If a sync is interrupted (Ctrl+C, power loss, drive removal), the next run will
+automatically detect the stale lock and resume. Your previous consolidated archive
+is untouched because TakeOutBack always builds the new archive in a temporary file
+and only replaces the old one at the very end.
+
 If you want to import from a different folder than `Incoming/`, use the
 `--incoming` option:
 
@@ -49,7 +61,7 @@ which is still readable.
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.3.7
+TakeOutBack v0.3.8
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523
@@ -58,6 +70,8 @@ Skipped files    : 181810
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
+Archive: /path/to/Archive/Consolidated-20260805-123045.123.zip
+Added:   /path/to/Archive/Added-20260805-123045.123.zip
 ```
 
 - **Archives scanned**: number of ZIP files found in `Incoming/`.
@@ -66,6 +80,8 @@ Status           : OK
 - **Modified files**: entries whose path was already archived but whose CRC or
   size changed. They are stored as a new version (`name__v2.ext`, `name__v3.ext`).
 - **Skipped files**: entries that were already present with identical CRC and size.
+- **Archive / Added**: paths to the new consolidated archive and the archive
+  containing only the files added in this run.
 
 ## File Versioning
 

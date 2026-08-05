@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gukak/GoogleTakeOutBack/internal/app"
@@ -67,11 +68,26 @@ func Sync(env *app.Env, args []string) error {
 
 	report := &Report{}
 
-	if err := recoverArchive(env); err != nil {
+	currentArchive, err := env.CurrentArchive()
+	if err != nil {
+		return fmt.Errorf("cannot locate current archive: %w", err)
+	}
+
+	// Backup the current consolidated archive before modifying anything.
+	if currentArchive != "" {
+		if err := backupArchive(env, currentArchive); err != nil {
+			return fmt.Errorf("cannot backup current archive: %w", err)
+		}
+		if err := rotateBackups(env.Backup, 5); err != nil {
+			env.Logf("warn", "backup rotation failed: %v", err)
+		}
+	}
+
+	if err := recoverArchive(env, currentArchive); err != nil {
 		return fmt.Errorf("recovery failed: %w", err)
 	}
 
-	existing, err := loadExistingIndex(env.ArchiveZip)
+	existing, existingEntries, err := loadExistingIndex(currentArchive)
 	if err != nil {
 		return err
 	}
@@ -87,17 +103,48 @@ func Sync(env *app.Env, args []string) error {
 
 	printArchiveList(incomingFiles)
 
-	dst, err := zipx.OpenOrCreate(env.ArchiveZip)
+	ts := time.Now().UTC()
+	newArchiveName := timestampName("Consolidated", ts)
+	addedArchiveName := timestampName("Added", ts)
+	newArchivePath := uniqueArchivePath(env.Archive, newArchiveName)
+	addedArchivePath := uniqueArchivePath(env.Archive, addedArchiveName)
+	newArchiveTmp := newArchivePath + ".tmp"
+	addedArchiveTmp := addedArchivePath + ".tmp"
+
+	newDst, err := zipx.OpenOrCreate(newArchiveTmp)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot create new archive: %w", err)
+	}
+	addedDst, err := zipx.OpenOrCreate(addedArchiveTmp)
+	if err != nil {
+		_ = newDst.Close()
+		cleanupSync(newArchiveTmp)
+		return fmt.Errorf("cannot create added archive: %w", err)
 	}
 
 	var allEntries []*zipx.Entry
-	for _, e := range existing {
-		allEntries = append(allEntries, e)
+	allEntries = append(allEntries, existingEntries...)
+
+	// Copy existing entries into the new archive first.
+	if currentArchive != "" {
+		oldFile, err := os.Open(currentArchive)
+		if err != nil {
+			cleanupSync(newArchiveTmp, addedArchiveTmp)
+			return fmt.Errorf("cannot open current archive: %w", err)
+		}
+		for _, e := range existingEntries {
+			if _, err := zipx.CopyRawEntry(newDst, oldFile, e); err != nil {
+				_ = oldFile.Close()
+				cleanupSync(newArchiveTmp, addedArchiveTmp)
+				return fmt.Errorf("cannot copy existing entry %s: %w", e.Name, err)
+			}
+		}
+		_ = oldFile.Close()
 	}
 
+	var addedEntries []*zipx.Entry
 	appended := false
+
 	for _, path := range incomingFiles {
 		src, err := zipx.OpenFileRead(path)
 		if err != nil {
@@ -113,6 +160,7 @@ func Sync(env *app.Env, args []string) error {
 				continue
 			}
 			key := app.NormalizeKey(e.Name)
+			var written *zipx.Entry
 			if head, ok := existing[key]; ok {
 				_, next, found := findVersion(existing, head.Name, e.CRC32, e.UncompressedSize)
 				if found {
@@ -120,37 +168,42 @@ func Sync(env *app.Env, args []string) error {
 					continue
 				}
 				e.Name = app.InsertVersionSuffix(head.Name, next)
-				written, err := zipx.CopyRawEntry(dst, src.File, e)
+				written, err = zipx.CopyRawEntry(newDst, src.File, e)
 				if err != nil {
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
 					continue
 				}
-				report.BytesAppended += int64(written.CompressedSize)
-				allEntries = append(allEntries, written)
-				existing[app.NormalizeKey(written.Name)] = written
 				report.ModifiedFiles++
-				appended = true
-				env.Logf("info", "appended %s (%d bytes compressed)", written.Name, written.CompressedSize)
 			} else {
-				written, err := zipx.CopyRawEntry(dst, src.File, e)
+				written, err = zipx.CopyRawEntry(newDst, src.File, e)
 				if err != nil {
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
 					continue
 				}
-				report.BytesAppended += int64(written.CompressedSize)
-				allEntries = append(allEntries, written)
-				existing[app.NormalizeKey(written.Name)] = written
 				report.NewFiles++
-				appended = true
-				env.Logf("info", "appended %s (%d bytes compressed)", written.Name, written.CompressedSize)
 			}
+			report.BytesAppended += int64(written.CompressedSize)
+			allEntries = append(allEntries, written)
+			existing[app.NormalizeKey(written.Name)] = written
+			appended = true
+
+			// Copy the same entry to the Added archive.
+			added, err := zipx.CopyRawEntry(addedDst, src.File, e)
+			if err != nil {
+				env.Logf("warn", "cannot copy added entry %s: %v", e.Name, err)
+			} else {
+				addedEntries = append(addedEntries, added)
+			}
+			env.Logf("info", "appended %s (%d bytes compressed)", written.Name, written.CompressedSize)
 		}
 		bar.finish()
 		_ = src.Close()
 	}
 
 	if !appended {
-		_ = dst.Close()
+		_ = newDst.Close()
+		_ = addedDst.Close()
+		cleanupSync(newArchiveTmp, addedArchiveTmp)
 		env.Log("info", "no new or modified files to append")
 		printReport(env, report, start)
 		return nil
@@ -160,28 +213,52 @@ func Sync(env *app.Env, args []string) error {
 		return allEntries[i].LocalHeaderOff < allEntries[j].LocalHeaderOff
 	})
 
-	eocd, err := zipx.WriteCentralDir(dst, allEntries)
+	// Write the new consolidated archive.
+	eocd, err := zipx.WriteCentralDir(newDst, allEntries)
 	if err != nil {
-		_ = dst.Close()
+		cleanupSync(newArchiveTmp, addedArchiveTmp)
 		return fmt.Errorf("write central directory: %w", err)
 	}
-	if err := dst.Sync(); err != nil {
-		_ = dst.Close()
+	if err := newDst.Sync(); err != nil {
+		cleanupSync(newArchiveTmp, addedArchiveTmp)
 		return err
 	}
-	if err := dst.Close(); err != nil {
+	if err := newDst.Close(); err != nil {
+		cleanupSync(newArchiveTmp, addedArchiveTmp)
 		return err
 	}
 
-	cdBytes, err := readTailCD(env.ArchiveZip, eocd)
+	// Write the Added archive.
+	if err := writeAddedArchive(addedDst, addedEntries); err != nil {
+		cleanupSync(newArchiveTmp, addedArchiveTmp)
+		return fmt.Errorf("write added archive: %w", err)
+	}
+
+	// Move temporary files to their final timestamped names.
+	if err := os.Rename(newArchiveTmp, newArchivePath); err != nil {
+		cleanupSync(newArchiveTmp, addedArchiveTmp)
+		return fmt.Errorf("rename new archive: %w", err)
+	}
+	if err := os.Rename(addedArchiveTmp, addedArchivePath); err != nil {
+		_ = os.Remove(newArchivePath)
+		cleanupSync(newArchiveTmp, addedArchiveTmp)
+		return fmt.Errorf("rename added archive: %w", err)
+	}
+
+	// The old consolidated archive is now superseded; remove it from Archive
+	// because a copy already lives in Backup.
+	if currentArchive != "" {
+		_ = os.Remove(currentArchive)
+	}
+
+	cdBytes, err := readTailCD(newArchivePath, eocd)
 	if err != nil {
 		return err
 	}
 
-	s := state.New(filepath.Base(env.ArchiveZip), app.Version)
+	s := state.New(filepath.Base(newArchivePath), app.Version)
 	s.ArchiveEnd = eocd.Offset + zipx.EOCDSize
 	if eocd.HasZip64 {
-		// approximate end; EOCD is always last
 		s.ArchiveEnd = eocd.Offset + zipx.EOCDSize
 	}
 	s.Entries = int64(len(allEntries))
@@ -201,24 +278,27 @@ func Sync(env *app.Env, args []string) error {
 
 	report.Duration = time.Since(start)
 	printReport(env, report, start)
-	env.Logf("info", "sync completed in %s", report.Duration)
+	env.Summary("Archive: %s", newArchivePath)
+	env.Summary("Added:   %s", addedArchivePath)
+	env.Logf("info", "sync completed in %s, archive=%s, added=%s", report.Duration, newArchivePath, addedArchivePath)
 	return nil
 }
 
-func loadExistingIndex(path string) (map[string]*zipx.Entry, error) {
+func loadExistingIndex(path string) (map[string]*zipx.Entry, []*zipx.Entry, error) {
+	emptyIdx := map[string]*zipx.Entry{}
 	st, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return map[string]*zipx.Entry{}, nil
+			return emptyIdx, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	if st.Size() == 0 {
-		return map[string]*zipx.Entry{}, nil
+		return emptyIdx, nil, nil
 	}
 	fr, err := zipx.OpenFileRead(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer fr.Close()
 	idx := make(map[string]*zipx.Entry)
@@ -228,7 +308,7 @@ func loadExistingIndex(path string) (map[string]*zipx.Entry, error) {
 			idx[key] = e
 		}
 	}
-	return idx, nil
+	return idx, fr.Entries, nil
 }
 
 func discoverIncoming(dir string) ([]string, error) {
@@ -238,6 +318,106 @@ func discoverIncoming(dir string) ([]string, error) {
 	}
 	sort.Strings(matches)
 	return matches, nil
+}
+
+func timestampName(prefix string, t time.Time) string {
+	return fmt.Sprintf("%s-%s.zip", prefix, t.UTC().Format("20060102-150405.000"))
+}
+
+func uniqueArchivePath(dir, name string) string {
+	candidate := filepath.Join(dir, name)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate
+	}
+	base := strings.TrimSuffix(name, ".zip")
+	for i := 1; i < 1000; i++ {
+		candidate = filepath.Join(dir, fmt.Sprintf("%s_%d.zip", base, i))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return filepath.Join(dir, name)
+}
+
+func backupArchive(env *app.Env, src string) error {
+	if src == "" {
+		return nil
+	}
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	dst := uniqueArchivePath(env.Backup, filepath.Base(src))
+	return copyFile(src, dst)
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func rotateBackups(dir string, keep int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var files []os.DirEntry
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, "Consolidated-") && strings.HasSuffix(name, ".zip") {
+			files = append(files, e)
+		}
+	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name() > files[j].Name() // newest first
+	})
+	for i := keep; i < len(files); i++ {
+		_ = os.Remove(filepath.Join(dir, files[i].Name()))
+	}
+	return nil
+}
+
+func cleanupSync(paths ...string) {
+	for _, p := range paths {
+		_ = os.Remove(p)
+	}
+}
+
+func writeAddedArchive(dst *os.File, entries []*zipx.Entry) error {
+	if len(entries) == 0 {
+		_ = dst.Close()
+		cleanupSync(dst.Name())
+		return nil
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].LocalHeaderOff < entries[j].LocalHeaderOff
+	})
+	if _, err := zipx.WriteCentralDir(dst, entries); err != nil {
+		_ = dst.Close()
+		return err
+	}
+	if err := dst.Sync(); err != nil {
+		_ = dst.Close()
+		return err
+	}
+	return dst.Close()
 }
 
 func shouldSkip(env *app.Env, e *zipx.Entry) bool {
@@ -293,11 +473,39 @@ func readTailCD(archivePath string, eocd *zipx.EOCD) ([]byte, error) {
 
 func acquireLock(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err == nil {
+		_, _ = f.WriteString(strconv.Itoa(os.Getpid()))
+		return f, nil
+	}
+	if !os.IsExist(err) {
+		return nil, fmt.Errorf("cannot acquire lock: %w", err)
+	}
+
+	// Lock file already exists: check whether it is stale.
+	data, err := os.ReadFile(path)
+	if err == nil {
+		pidStr := strings.TrimSpace(string(data))
+		pid, _ := strconv.Atoi(pidStr)
+		if pid > 0 && processExists(pid) {
+			return nil, fmt.Errorf("cannot acquire lock (another instance running with PID %d?)", pid)
+		}
+	}
+	// Stale lock: remove and retry once.
+	_ = os.Remove(path)
+	f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, fmt.Errorf("cannot acquire lock (another instance running?): %w", err)
+		return nil, fmt.Errorf("cannot acquire lock after removing stale lock: %w", err)
 	}
 	_, _ = f.WriteString(strconv.Itoa(os.Getpid()))
 	return f, nil
+}
+
+func processExists(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func releaseLock(f *os.File) {
@@ -343,8 +551,11 @@ func formatDuration(d time.Duration) string {
 }
 
 // recoverArchive validates and, if necessary, repairs the consolidated archive.
-func recoverArchive(env *app.Env) error {
-	st, err := os.Stat(env.ArchiveZip)
+func recoverArchive(env *app.Env, archivePath string) error {
+	if archivePath == "" {
+		return nil
+	}
+	st, err := os.Stat(archivePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -355,7 +566,7 @@ func recoverArchive(env *app.Env) error {
 		return nil
 	}
 
-	f, err := os.Open(env.ArchiveZip)
+	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
@@ -372,10 +583,10 @@ func recoverArchive(env *app.Env) error {
 	if s, err := state.Load(env.StatePath); err == nil && s.ArchiveEnd > 0 && s.ArchiveEnd <= st.Size() {
 		env.Logf("info", "truncating archive to last known good size %d", s.ArchiveEnd)
 		_ = f.Close()
-		if err := os.Truncate(env.ArchiveZip, s.ArchiveEnd); err != nil {
+		if err := os.Truncate(archivePath, s.ArchiveEnd); err != nil {
 			return err
 		}
-		check, err := os.Open(env.ArchiveZip)
+		check, err := os.Open(archivePath)
 		if err != nil {
 			return err
 		}
@@ -388,22 +599,22 @@ func recoverArchive(env *app.Env) error {
 
 	// Fallback: full LFH scan and rebuild CD.
 	env.Log("warn", "falling back to full local-header scan")
-	entries, err := zipx.ScanLocalHeaders(env.ArchiveZip)
+	entries, err := zipx.ScanLocalHeaders(archivePath)
 	if err != nil {
 		return err
 	}
 	env.Logf("info", "rebuilt index from %d local headers", len(entries))
 
 	if len(entries) == 0 {
-		return os.Truncate(env.ArchiveZip, 0)
+		return os.Truncate(archivePath, 0)
 	}
 
-	dst, err := zipx.OpenOrCreate(env.ArchiveZip + ".rebuild")
+	dst, err := zipx.OpenOrCreate(archivePath + ".rebuild")
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
-		src, err := os.Open(env.ArchiveZip)
+		src, err := os.Open(archivePath)
 		if err != nil {
 			_ = dst.Close()
 			return err
@@ -426,7 +637,7 @@ func recoverArchive(env *app.Env) error {
 	if err := dst.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(env.ArchiveZip+".rebuild", env.ArchiveZip); err != nil {
+	if err := os.Rename(archivePath+".rebuild", archivePath); err != nil {
 		return err
 	}
 	return nil
@@ -434,7 +645,15 @@ func recoverArchive(env *app.Env) error {
 
 // Verify checks archive integrity.
 func Verify(env *app.Env, args []string) error {
-	st, err := os.Stat(env.ArchiveZip)
+	archivePath, err := env.CurrentArchive()
+	if err != nil {
+		return fmt.Errorf("cannot locate current archive: %w", err)
+	}
+	if archivePath == "" {
+		env.Summary("Archive does not exist yet")
+		return nil
+	}
+	st, err := os.Stat(archivePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("archive does not exist")
@@ -445,7 +664,7 @@ func Verify(env *app.Env, args []string) error {
 		env.Summary("Archive is empty")
 		return nil
 	}
-	fr, err := zipx.OpenFileRead(env.ArchiveZip)
+	fr, err := zipx.OpenFileRead(archivePath)
 	if err != nil {
 		return err
 	}
@@ -522,7 +741,15 @@ func verifyEntry(f *os.File, e *zipx.Entry, deep bool) error {
 
 // Stats prints archive statistics.
 func Stats(env *app.Env, args []string) error {
-	st, err := os.Stat(env.ArchiveZip)
+	archivePath, err := env.CurrentArchive()
+	if err != nil {
+		return fmt.Errorf("cannot locate current archive: %w", err)
+	}
+	if archivePath == "" {
+		env.Summary("Archive does not exist yet")
+		return nil
+	}
+	st, err := os.Stat(archivePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			env.Summary("Archive does not exist yet")
@@ -530,7 +757,7 @@ func Stats(env *app.Env, args []string) error {
 		}
 		return err
 	}
-	fr, err := zipx.OpenFileRead(env.ArchiveZip)
+	fr, err := zipx.OpenFileRead(archivePath)
 	if err != nil {
 		return err
 	}
@@ -574,9 +801,19 @@ func ratio(comp, uncomp int64) float64 {
 	return float64(comp) * 100.0 / float64(uncomp)
 }
 
-// Compact rewrites the archive removing dead central directory blocks.
+// Compact rewrites the current archive to remove any dead central directory
+// blocks. Because the archive is fully rewritten on every sync, this command is
+// rarely needed; it is kept for manual repair.
 func Compact(env *app.Env, args []string) error {
-	st, err := os.Stat(env.ArchiveZip)
+	archivePath, err := env.CurrentArchive()
+	if err != nil {
+		return fmt.Errorf("cannot locate current archive: %w", err)
+	}
+	if archivePath == "" {
+		env.Summary("Archive does not exist")
+		return nil
+	}
+	st, err := os.Stat(archivePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			env.Summary("Archive does not exist")
@@ -589,13 +826,13 @@ func Compact(env *app.Env, args []string) error {
 		return nil
 	}
 
-	fr, err := zipx.OpenFileRead(env.ArchiveZip)
+	fr, err := zipx.OpenFileRead(archivePath)
 	if err != nil {
 		return err
 	}
 	defer fr.Close()
 
-	tmp := env.ArchiveZip + ".compact"
+	tmp := archivePath + ".compact"
 	dst, err := zipx.OpenOrCreate(tmp)
 	if err != nil {
 		return err
@@ -618,10 +855,10 @@ func Compact(env *app.Env, args []string) error {
 	if err := dst.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, env.ArchiveZip); err != nil {
+	if err := os.Rename(tmp, archivePath); err != nil {
 		return err
 	}
-	st2, err := os.Stat(env.ArchiveZip)
+	st2, err := os.Stat(archivePath)
 	if err != nil {
 		return err
 	}

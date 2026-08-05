@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the current takeoutback version. It is overridden at build time.
-const Version = "v0.3.7"
+const Version = "v0.3.8"
 
 // OwnerRepo is the GitHub owner/repository used by the installer and updater.
 // Change this to the real repository before the first release.
@@ -24,6 +24,7 @@ const OwnerRepo = "gukak/GoogleTakeOutBack"
 const (
 	IncomingDir = "Incoming"
 	ArchiveDir  = "Archive"
+	BackupDir   = "Backup"
 	AppDir      = "TakeOutBack"
 
 	ToolsDir      = "tools"
@@ -33,14 +34,13 @@ const (
 	ScriptsDir    = "scripts"
 	DocsDir       = "docs"
 
-	ConsolidatedName     = "Consolidated.zip"
-	StateName            = "Consolidated.zip.state.json"
-	BackupCDName         = "Consolidated.zip.cd.bak"
-	LockName             = ".consolidated.lock"
-	SettingsName         = "settings.json"
-	PolicyName           = "policy.json"
-	VersionFileName      = "VERSION"
-	RootMarkerName       = ".takeoutback-root"
+	StateName     = "state.json"
+	BackupCDName  = "cd.bak"
+	LockName      = ".consolidated.lock"
+	SettingsName  = "settings.json"
+	PolicyName    = "policy.json"
+	VersionFileName = "VERSION"
+	RootMarkerName  = ".takeoutback-root"
 
 	WindowsBinaryName = "takeoutback.exe"
 	LinuxBinaryName   = "takeoutback"
@@ -88,14 +88,14 @@ func DefaultPolicy() Policy {
 
 // Env holds the resolved project layout and runtime services.
 type Env struct {
-	Root       string
-	Incoming   string
-	Archive    string
-	ArchiveZip string
-	StatePath  string
-	BackupCD   string
-	LockPath   string
-	AppRoot    string
+	Root      string
+	Incoming  string
+	Archive   string
+	Backup    string
+	StatePath string
+	BackupCD  string
+	LockPath  string
+	AppRoot   string
 	ToolsLinux string
 	ToolsWin   string
 	ConfigDir  string
@@ -120,7 +120,7 @@ func NewEnv(rootFlag string) (*Env, error) {
 	e := &Env{Root: root}
 	e.Incoming = filepath.Join(root, IncomingDir)
 	e.Archive = filepath.Join(root, ArchiveDir)
-	e.ArchiveZip = filepath.Join(e.Archive, ConsolidatedName)
+	e.Backup = filepath.Join(root, BackupDir)
 	e.StatePath = filepath.Join(e.Archive, StateName)
 	e.BackupCD = filepath.Join(e.Archive, BackupCDName)
 	e.LockPath = filepath.Join(e.Archive, LockName)
@@ -231,6 +231,7 @@ func ensureLayout(root string) error {
 	dirs := []string{
 		filepath.Join(root, IncomingDir),
 		filepath.Join(root, ArchiveDir),
+		filepath.Join(root, BackupDir),
 		filepath.Join(root, AppDir),
 		filepath.Join(root, AppDir, ToolsDir, "linux"),
 		filepath.Join(root, AppDir, ToolsDir, "windows"),
@@ -332,6 +333,33 @@ func (e *Env) BinaryPath() string {
 // NormalizeKey returns the lowercased, slash-only path used for identity comparison.
 func NormalizeKey(p string) string {
 	return strings.ToLower(filepath.ToSlash(p))
+}
+
+// CurrentArchive returns the most recent Consolidated-YYYYMMDD-HHMMSS.zip in
+// the Archive directory, or an empty string if none exists. Names are sorted
+// lexicographically because the embedded timestamp format is sortable.
+func (e *Env) CurrentArchive() (string, error) {
+	entries, err := os.ReadDir(e.Archive)
+	if err != nil {
+		return "", err
+	}
+	var best string
+	for _, ent := range entries {
+		if ent.IsDir() {
+			continue
+		}
+		name := ent.Name()
+		if !strings.HasPrefix(name, "Consolidated-") || !strings.HasSuffix(name, ".zip") {
+			continue
+		}
+		if best == "" || name > best {
+			best = name
+		}
+	}
+	if best == "" {
+		return "", nil
+	}
+	return filepath.Join(e.Archive, best), nil
 }
 
 // InsertVersionSuffix inserts __vN before the final extension of the basename.

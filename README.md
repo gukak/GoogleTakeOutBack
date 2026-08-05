@@ -14,14 +14,16 @@ Google Takeout ZIP exports into a single logical archive history.
 - **ZIP only**: input and output are standard ZIP files; no other archive format.
 - **Never loses history**: keeps every file, every version of modified files and
   every file later deleted from Google.
-- **Efficient**: reads ZIP central directories and copies raw compressed streams;
-  never extracts full archives and never rewrites the archive on every sync.
-- **Crash-safe**: append-only archive, atomic sidecar updates and automatic
-  recovery from power loss or forced termination.
+- **Crash-safe**: each sync writes new timestamped archives from scratch; the
+  previous consolidated archive is backed up in `Backup/` before being replaced.
 - **Self-contained**: all required binaries are shipped inside the project tree;
   no dependency on system `zip`, `unzip`, Python or other tools.
 - **Self-updating**: built-in updater fetches new binaries from GitHub Releases
   without touching your archives.
+- **Added-only archive**: each sync produces a companion `Added-*.zip` containing
+  only the files imported during that run.
+- **Stale-lock recovery**: if a previous run was killed (Ctrl+C, power loss),
+  the next run detects the abandoned lock and resumes safely.
 
 ## Quick Start
 
@@ -30,7 +32,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.7/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.8/install.sh | bash
 ```
 
 ### Install on Windows
@@ -38,7 +40,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.7/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.7/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.8/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -54,7 +56,10 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.7/install.
    files being processed in real time.
 4. Repeat whenever you have a new Takeout export.
 
-Your consolidated archive lives at `Archive/Consolidated.zip`.
+Your consolidated archive lives at `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`
+(the timestamp is updated on every sync). A companion `Added-YYYYMMDD-HHMMSS.mmm.zip`
+contains only the files imported during that sync, and the previous consolidated
+archive is copied to `Backup/` before being replaced.
 
 You can also sync from a different source folder:
 
@@ -74,10 +79,11 @@ Archives to process: 2
   [===========>                  ] takeout-2025-002.zip  623/1823 (34%)
 ```
 
-When the run finishes, the usual summary is printed:
+When the run finishes, the usual summary is printed, including the paths to
+both the new consolidated archive and the added-only archive:
 
 ```
-TakeOutBack v0.3.7
+TakeOutBack v0.3.8
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142
@@ -86,6 +92,8 @@ Skipped files    : 3215
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
+Archive: /path/to/Archive/Consolidated-20260805-123045.123.zip
+Added:   /path/to/Archive/Added-20260805-123045.123.zip
 ```
 
 ## Commands

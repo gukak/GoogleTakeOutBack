@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.3.7** — the design described here is implemented and
+> Status: **Implemented v0.3.8** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -8,8 +8,8 @@
 ## 1. Executive Summary
 
 TakeOutBack is a portable, offline, cross-platform (Windows 10/11 x64, Linux x86_64)
-application that consolidates multiple Google Takeout ZIP exports into a single
-append-only ZIP archive (`Consolidated.zip`) while preserving every historical
+application that consolidates multiple Google Takeout ZIP exports into timestamped
+ZIP archives (`Consolidated-YYYYMMDD-HHMMSS.mmm.zip`) while preserving every historical
 file, every historical version of modified files, and all files later removed from
 the Google account. No database, no server, no extraction of full archives.
 
@@ -18,9 +18,11 @@ The recommended architecture is:
 - A **single self-contained native binary** (per platform) implementing the
   synchronization engine, written in **Go**.
 - **ZIP as the only storage format** for both input and output.
-- An **append-only consolidated archive** with a rewritten central directory at
-  each sync, plus a tiny state sidecar (`Consolidated.zip.state.json`) and a
-  backup central-directory sidecar (`Consolidated.zip.cd.bak`) for crash safety.
+- A **timestamped consolidated archive** recreated at each sync, plus a companion
+  `Added-*.zip` containing only the files imported during that run, plus a
+  `Backup/` directory holding the previous consolidated archive. A tiny state
+  sidecar (`Archive/state.json`) and a backup central-directory sidecar
+  (`Archive/cd.bak`) assist recovery.
 - **File identity by ZIP metadata**: `(normalized internal path, uncompressed
   size, CRC32)`, taken directly from the ZIP central directories. SHA-256 is
   used only for verifying downloaded binaries and integrity-checking the
@@ -93,20 +95,22 @@ are ever required on the host.**
 > constraints dominate. The implementation is a single stdlib-only Go binary per
 > platform. The decision is recorded in §14.
 
-### 3.2 Storage model — **single append-only ZIP archive**
+### 3.2 Storage model — **timestamped consolidated ZIP archives**
 
-**Decision**: The complete historical collection lives in exactly one ZIP file,
-`Archive/Consolidated.zip`. It is **append-only**: file payloads are appended
-at the end; the central directory is rewritten at the end at each sync; never
-overwritten, never truncated except in the documented recovery/compaction paths.
+**Decision**: The complete historical collection lives in a single *current*
+ZIP file named `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`. On every sync a
+brand-new consolidated archive is written from scratch into a temporary file;
+once complete it is renamed into place and the previous consolidated archive is
+removed from `Archive/` (a copy already lives in `Backup/`). A companion
+`Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` contains only the entries imported during
+that sync.
 
-Detailed mechanics in §7. Rationale here.
-
-Why one archive (vs alternatives in §4):
+Why this model (vs alternatives in §4):
 
 - Satisfies C3 (ZIP only) and the "single logical consolidated archive" requirement literally.
-- Append-only = monotonic growth = trivially crash-safe if we never overwrite known-good bytes.
-- One file is easier to back up, copy, move, inspect than a tree of files.
+- Crash-safe: the previous archive is never touched while the new one is being written.
+- The `Backup/` copy provides an immediately accessible rollback point.
+- The `Added-*.zip` gives a per-sync view of what changed.
 - Cross-platform byte layout: ZIP bodies are platform-independent.
 
 ### 3.3 State model — **deduced from ZIP, with tiny JSON sidecar**
@@ -114,12 +118,12 @@ Why one archive (vs alternatives in §4):
 **Decision**: No database. The **consolidated archive's central directory is the
 source of truth** for what files exist, their versions and their sizes/CRCs.
 
-A tiny sidecar `Archive/Consolidated.zip.state.json` (a few hundred bytes —
+A tiny sidecar `Archive/state.json` (a few hundred bytes —
 **NOT user data, archive-derivable**) stores only:
 
 - `version` (sidecar format version, e.g. `1`)
-- `archive_path` (relative)
-- `archive_end` (current size of `Consolidated.zip`)
+- `archive_path` (basename of the current `Consolidated-*.zip`)
+- `archive_end` (current size of the consolidated archive)
 - `entries` (count)
 - `cd_offset` (offset of the **last valid** central directory)
 - `cd_size` (bytes)
@@ -398,125 +402,77 @@ on its own, so the file body is **self-describing**.
    archives. We do NOT attempt to merge a "logical" multi-part set because
    Google's **TAR multi-volume** numbering is just a sequential split, while the
    **ZIP** export format Google offers yields independent ZIPs.
-- `Archive/Consolidated.zip` (created on first sync).
+- The current `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` (if any).
 
 ### 6.2 Step-by-step
 
-1. **Startup health check**
-   - Resolve project root from where the launcher lives; verify `Incoming/`,
-     `Archive/`, `TakeOutBack/{tools,config,logs,temp}` exist; create missing.
-   - Load `config/Consolidated.zip.state.json` (if missing, set `is_first=true`).
-   - Open `Archive/Consolidated.zip` if it exists. Verify its current EoCD/CD
-     integrity (compare `cd_sha256` in state file vs actual CD bytes).
-     - If consistent → proceed.
-     - If inconsistent → run **Recovery** (§9) before doing anything else.
-       Recovery may take time; log it; never auto-write until recovered.
-   - Load the existing index `IndexExisting` = `path → [(version_index, size, crc32, cd_offset, method)]`
-     from the **last good central directory** (fast: parse CD only).
+1. **Startup**
+   - Resolve project root; verify `Incoming/`, `Archive/`, `Backup/`,
+     `TakeOutBack/{tools,config,logs,temp}` exist; create missing.
+   - Determine the current consolidated archive by scanning `Archive/` for the
+     lexicographically greatest `Consolidated-*.zip` name (timestamp format is
+     sortable).
+   - Acquire a cross-run lockfile `Archive/.consolidated.lock`. If it exists and
+     the recorded PID is alive, abort with a clear message; otherwise treat it as
+     stale and remove it.
 
-2. **Discover incoming archives**
-   - Glob `Incoming/*.zip` (case-insensitive on Windows, still okay on Linux).
-   - For each candidate, probe by opening with `zip.OpenReader` (Go) — if it
-     fails to read a central directory, log a **warning** and skip (don't crash
-     on a half-downloaded Takeout). This is the validity test.
+2. **Backup previous archive**
+   - If a current consolidated archive exists, copy it to `Backup/` before any
+     modification. Keep the 5 most recent backups and remove older ones.
+
+3. **Recovery check**
+   - Verify the current consolidated archive's EoCD/CD integrity.
+   - If inconsistent, run **Recovery** (§9) before proceeding.
+
+4. **Load existing index**
+   - Load `IndexExisting` = `path → entry` from the current consolidated archive's
+     central directory (fast: parse CD only).
+
+5. **Discover incoming archives**
+   - Glob `Incoming/*.zip`.
+   - For each candidate, probe by opening it; if it fails, log a warning and skip.
    - Print a numbered list of the archives that will be processed.
 
-3. **Build incoming index per archive**
-   - For each valid Takeout ZIP `T`:
-     - Walk the central directory entries.
-     - Filter out Google Takeout's own utility entries (e.g. `archive_browser.html`,
-       `index.html` of the export, `.*.json` metadata sidecars) — the maintainer
-       decides policy via `config/policy.json` (default: keep all files; the
-       filter is OPT-IN and OFF by default to honor "preserve everything").
-      - Build `IndexIncoming_T` = `normalized_path → (size, crc32, method, cd_offset_in_T, compressed_size_in_T, flags)`.
-      - Render a per-archive progress bar on the console while entries are
-        processed.
+6. **Build new archives**
+   - Create two temporary files in `Archive/`:
+     - `Consolidated-YYYYMMDD-HHMMSS.mmm.zip.tmp`
+     - `Added-YYYYMMDD-HHMMSS.mmm.zip.tmp`
+   - Copy all existing entries from the current archive into the new consolidated
+     temporary file.
+   - For each valid incoming archive, render a per-archive progress bar and
+     process every entry:
+     - Skip unchanged entries (identical CRC and size).
+     - For new entries, write them to both the new consolidated archive and the
+       `Added` archive.
+     - For modified entries, write the versioned name (`name__vN.ext`) to both
+       archives.
+   - Write the central directory and EoCD to both temporary files.
 
-4. **Diff & classify**
-   - For each entry `(p, s, c)` in `IndexIncoming_T`:
-     - If `IndexExisting` does not contain `p` → **NEW**. Append candidate list
-       as `(p, src_archive=T, src_offset=cd_offset, kind=NEW)`.
-     - Else let `existing_head` = the **plain-name** entry for `p` (the original
-       one). Compute `(s_existing_head, c_existing_head)`:
-       - If `(s, c) == (s_existing_head, c_existing_head)` → **UNCHANGED**
-         (skip; counter++).
-       - Else → **MODIFIED**. Candidate appended as
-         `(suffixed_name_using_count, src_archive=T, src_offset=cd_offset, kind=MOD)`.
-       - The "max version count" for the suffix is taken across all entries for
-         that `p` already in `IndexExisting` (count `__v<N>` occurrences and the
-         literal plain entry = v1). The new entry gets the next counter value.
+7. **Atomic switch**
+   - `fsync` both temporary files.
+   - Rename them to their final `Archive/Consolidated-*.zip` and
+     `Archive/Added-*.zip` names.
+   - Remove the previous consolidated archive from `Archive/` (it is already in
+     `Backup/`).
 
-5. **Append payloads (raw deflate copy)**
-   - Acquire a single-byte lockfile `Archive/.consolidated.lock` (atomic create
-     with `O_EXCL`) to prevent two TakeOutBack instances interfering.
-   - Open `Consolidated.zip` in `O_WRONLY|O_APPEND` (or r+b to allow later
-     backpatch — not required because we never read-modify-write LFHs).
-   - For each append candidate:
-     - Open the source entry from `T` via `zip.OpenReader(T)`; locate the same
-       entry by its central-directory index; copy its **compressed bytes** from
-       the source archive into the destination via an `io.CopySection` (we know
-       the compressed-data offset: `cd_offset_to_local` + `LFH_size`; LFH is
-       parsed to know its size, no need to compute from spec each time — Go's
-       `zip.Reader` exposes `File` but not raw offset; we use `(*zip.Reader).OpenRaw`
-       style by reading the LFH ourselves to get offset/size). Write a new LFH
-       in the destination with the **same** method, **same** CRC32, **same**
-       uncompressed/compressed sizes, the **same** extra fields (normalized),
-       same UTF-8 path (with our suffix if MOD). Stream-copy the deflate payload.
-       - Result: byte-exact payload (identity preserved), zero recompression.
-       - **Corner case**: `Method = Store` entries can also be re-deflated to
-         save space optionally — **off** by default (we preserve bytes). We
-         document the toggle in `policy.json`.
-     - After each entry appended, optionally progress-sync to disk (we batch:
-       fsync after each Takeout-file worth of entries).
-   - Keep a list of `[(orig_dst_path,LFH_offset,method,crc,size)]` to build the
-     central directory from.
+8. **Finalize state**
+   - Write `Archive/state.json` and `Archive/cd.bak` atomically.
+   - Release the lockfile.
 
-6. **Append new central directory + new EoCD**
-   - Compute `cd_offset` = current file size after all new payloads appended.
-   - Write the new central directory containing entries for **all** known files
-     (old entries + new entries) — but note: since we're append-only and the old
-     central directory still physically exists earlier in the file, the **new**
-     central directory supersedes it. After this writer is done, the file ends
-     with: `[payloads...][new CD][new EoCD]`.
-   - Implementation detail: rather than recomputing the **full** central
-     directory from scratch by scanning every old LFH (slow on a huge archive),
-     we keep the **list of all prior CD records** in the sidecar/in memory by
-     parsing the prior CD once at startup (cheap — CD is small relative to
-     payloads). We then **append only the added CD records** conceptually, but
-     since CD must be contiguous and followed by exactly one EoCD referencing
-     its start, we must write the **full** CD at the new offset. We do this by:
-     - At startup, we read the **bytes of the existing CD** into memory (parse
-       CD records into `[]cd_record`, plus keep a raw byte copy for fast append).
-     - Append the new CD records (only the appended entries since last sync).
-     - Then **append the entire existing CD bytes + new CD records** at the end
-       of the file. The **new EoCD** points to this freshly-written contiguous
-       CD block. The old CD bytes are now dead weight in the middle of the file
-       (pruned during compaction, §7.4).
-   - Write EoCD with `_cd_total_entries`, `_cd_size`, `_cd_offset`; if we exceed
-     classic ZIP limits, Go's `zip.Writer` will emit ZIP64 EoCD automatically
-     **only if** we route through its writer — but we are hand-writing the CD
-     for surgical control. Therefore we **emit ZIP64 records ourselves** when the
-     chain crosses thresholds (`> 0xFFFF` entries, `> 0xFFFFF_FFF` offsets, etc.);
-     see §7.5 for the exact ordering (Zip64 EOCD locator + Zip64 EOCD + EOCD).
-   - **Final fsync**.
-
-7. **Finalize state sidecar atomically**
-   - Build new state JSON `state.new.tmp`. `validate_against_live_archive`.
-   - `write tmp → fsync → os.Rename(tmp, state.json)` atomic.
-   - Update `Consolidated.zip.cd.bak` with the last good CD bytes (atomic same way).
-   - Release lockfile (close + unlink).
-
-8. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary.
+9. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
+   including the paths of the new consolidated and added archives.
 
 ### 6.3 Worst-case complexity
 
-- Per sync: O(E_in) incoming entries to classify + O(E_in) appends + O(E_total)
-  to write one new contiguous CD block.
-- CD rewrite cost = O(E_total) bytes per sync (the unavoidable cost: ZIP's CD
-  is its index). For 10^6 historical entries, CD ~ 100–200 MB at most — easily
-  written in a second on USB 3 + SSD. Acceptable.
-- Payload cost = only NEW + MOD payloads (the design's main efficiency win).
-- No full-archive rewriting, no full decompression.
+- Per sync: O(E_in) incoming entries to classify + O(E_total) entry copies +
+  O(E_total) to write the new consolidated CD + O(E_added) to write the Added CD.
+- Because the archive is fully rewritten each sync, the CD rewrite cost is
+  O(E_total) bytes. For 10^6 historical entries, the CD is ~ 100–200 MB — easily
+  written in a few seconds on USB 3 + SSD.
+- Payload cost = all existing payloads + NEW/MOD payloads. This trades raw write
+  throughput for crash safety and simplicity: the previous archive is never
+  modified in place.
+- No full decompression is performed; payloads are copied raw byte-for-byte.
 
 ---
 
@@ -524,49 +480,35 @@ on its own, so the file body is **self-describing**.
 
 ### 7.1 Closure model & file ending
 
-End-of-file layout after a successful sync:
+Each consolidated archive is a complete, self-contained ZIP file ending with:
 
 ```
-... existing payloads ...
-... new payloads (this sync) ...
-[ dead old Central Directory bytes (until compaction) ]
-[ new full Central Directory bytes ]
+[ payloads ... ]
+[ full Central Directory bytes ]
 [ Zip64 End-Of-Central-Directory record (if needed) ]
 [ Zip64 EOCD Locator (if needed) ]
 [ EOCD record ]
 ```
 
 The **EOCD at the very end** is what spec-compliant readers find by scanning
-backward from EOF (within ~64KiB + its comment).
+backward from EOF (within ~64KiB + its comment). There are no "dead" CD blocks
+because the archive is rebuilt from scratch on every sync.
 
 ### 7.2 Why this is crash-safe
 
-- **Only append** ever mutates the file. We never overwrite previously-written
-  known-good bytes except the rare compaction step.
-- Between syncs the file ends with a stable, valid `[old CD][old EOCD]`
-  (and old payloads before).
-- During a sync we are **only appending** bytes. At any instant of failure:
-  - If killed before writing the new EOCD (i.e., during new payloads/new CD): the
-    last valid EOCD is NOT the trailing bytes anymore (EOF moved), but the old
-    EOCD **physically exists** inside the file but no longer at EOF position.
-    Standard readers scan the **last** ~64KiB for EOCD signature with comment
-    matching; with a 0-byte comment, the old EOCD has been displaced forward
-    from EOF. **Readers cannot auto-find it**. → file appears invalid.
-  - Therefore **our recovery (§9)** truncates the file back to the **last known
-    good `archive_end`** recorded in the sidecar, which places the old EOCD back
-    at EOF and restores a consistent archive. This is safe because the appended
-    bytes between `archive_end` and current EOF are simply thrown away (they are
-    copies of data still present in the incoming Takeout ZIP, which remains in
-    `Incoming/` until the user removes it — by policy we keep incoming files
-    until the user explicitly archives/deletes them, optionally after a verified
-    successful sync).
-  - If killed *after* writing a complete new EOCD but *before* updating the
-    state sidecar: on next startup we recognize `state.cd_offset` may not match
-    what the file claims; we **trust the file** (rebuild state sidecar from the
-    trailing valid EOCD/CD scan). Either source of truth is recoverable.
+- The previous consolidated archive is **copied to `Backup/`** before any write
+  begins, so it is always recoverable.
+- The new consolidated archive and the `Added` archive are written into temporary
+  files (`*.tmp`). The old archive is never opened for writing.
+- At any instant of failure, the previous consolidated archive remains intact.
+- Temporary files are either complete and valid (and will be renamed on the next
+  successful sync) or incomplete and ignored by the scanner, which only looks at
+  `Consolidated-*.zip` files without the `.tmp` suffix.
 - The two sidecars (`state.json` + `cd.bak`) are tiny and renamed atomically
   (Windows-safe rename-in-same-dir). Their loss degrades only performance
-  (startup must rebuild from a full LFH scan), not correctness.
+  (startup may need a full LFH scan), not correctness.
+- The lockfile is checked at startup: if the recorded PID is dead, the lock is
+  considered stale and removed; if it is alive, the second instance aborts.
 
 ### 7.3 Damage-controlled operations
 
@@ -578,18 +520,15 @@ backward from EOF (within ~64KiB + its comment).
 
 ### 7.4 Compaction (`--compact`, opt-in)
 
-Over many syncs, dead CD blocks accumulate. `--compact` rewrites the archive:
+Because the consolidated archive is already rebuilt from scratch on every sync,
+`--compact` is rarely needed. It is kept as a manual repair tool:
 
-- Snapshot current valid CD in memory.
-- Stream-copy all referenced payloads (raw bytes) into `Consolidated.zip.compact.tmp`.
+- Snapshot the current valid CD in memory.
+- Stream-copy all referenced payloads (raw bytes) into a temporary file.
 - Write a single new CD + EoCD.
-- Fsync, atomic `os.Rename` over `Consolidated.zip`.
+- Fsync, atomic `os.Rename` over the current consolidated archive.
 - Update sidecars.
 - Always recovers full consistency.
-
-This is the **only** operation that rewrites the archive (and it is opt-in and
-infrequent). Because every payload is byte-copied without decompression it's
-still cheap compared to a generic extract+rezip.
 
 ### 7.5 ZIP64 emission sequence (when limits crossed)
 
@@ -663,7 +602,7 @@ Operating principles:
 Recovery decision tree (run automatically before any sync):
 
 ```
-open Consolidated.zip ->
+find current Consolidated-*.zip ->
   read sidecar state.json and cd.bak (may be missing) ->
   scan trailing 64 KiB + 22 for EOCD signature with comment == 0 ->
   if found:
@@ -674,27 +613,26 @@ open Consolidated.zip ->
          cd.bak has valid bytes at cd_offset? if yes -> trust cd.bak
          else recompute CD from a full LFH scan (slow path) -> SUCCESS
   if not found:
-     file truncated mid-write ->
-       truncate_to_last_known_good_end (= sidecar.archive_end) ->
-       re-validate EOCD ->
-       if still fails -> full LFH scan; rebuild a CD; write it; update sidecars
+     file truncated or corrupt ->
+       if Backup/ has a valid earlier copy -> warn and continue from backup
+       else full LFH scan; rebuild a CD; write it; update sidecars
 ```
 
-Power-failure / force-quit / USB-yank modes covered:
+Power-failure / force-quit / USB-yank / Ctrl+C modes covered:
 
 | Crash point | Result on next run |
 |---|---|
-| Before first payload appended | Old archive untouched; nothing to do. |
-| Mid-append of a payload | Truncate to `archive_end` recorded in sidecar; sync resumes from incoming. |
-| After payloads, before CD | Same truncation; we simply re-add those entries next sync. |
-| Mid-CD write | Truncation; rerun. |
-| After CD, mid-EOCD write | Truncation; rerun. |
-| After EOCD, before sidecar update | On startup, file is consistent; we **derive** sidecar from the file's trailing CD and proceed; sidecars auto-overwritten. |
-| Mid-sidecar write (rename aborts) | The atomic rename means EITHER old OR new sidecar exists; never a partial file. Either is usable. |
+| Before temporary files are created | Old archive untouched; nothing to do. |
+| While copying existing entries | Temporary file is incomplete; ignored. Old archive remains current. |
+| While adding new entries | Temporary file is incomplete; ignored. Old archive remains current. |
+| During rename of temporary files | At least one of the temporary files or the new archive is valid. The scanner picks the latest valid `Consolidated-*.zip`. |
+| After rename, before sidecar update | File is consistent; we derive the sidecar from the trailing CD. |
+| Mid-sidecar write (rename aborts) | The atomic rename means EITHER old OR new sidecar exists; never a partial file. |
+| Lockfile left behind | Detected as stale if the recorded PID is dead; removed automatically. |
 
-**No corruption ever survives**: the worst case is "wasted space and a needed
-compaction". The smart invariant is **we never overwrite known-good committed
-bytes**, so we can always roll back to them.
+**No corruption ever survives**: the worst case is "the previous run is wasted
+and must be rerun". The invariant is **we never modify the current consolidated
+archive in place**, so it is always available as a rollback point.
 
 ### 9.1 Optional `.bak.shield` strategy
 
@@ -714,10 +652,13 @@ demand; it is too expensive to do on every sync.
 ├── Incoming/                         # user drop folder for new Takeout ZIPs
 │   └── (takeout*.zip)
 ├── Archive/
-│   ├── Consolidated.zip              # the master append-only archive
-│   ├── Consolidated.zip.state.json   # cache/recovery sidecar (NOT user data)
-│   ├── Consolidated.zip.cd.bak       # last-good CD backup (NOT user data)
-│   └── .consolidated.lock            # cross-run mutex (NOT user data)
+│   ├── Consolidated-YYYYMMDD-HHMMSS.mmm.zip  # current consolidated archive
+│   ├── Added-YYYYMMDD-HHMMSS.mmm.zip         # files added in this run
+│   ├── state.json                      # cache/recovery sidecar (NOT user data)
+│   ├── cd.bak                          # last-good CD backup (NOT user data)
+│   └── .consolidated.lock              # cross-run mutex (NOT user data)
+├── Backup/                             # copies of previous Consolidated archives
+│   └── Consolidated-YYYYMMDD-HHMMSS.mmm.zip
 └── TakeOutBack/
     ├── app/                          # <reserved> application support files
     ├── tools/
@@ -743,8 +684,8 @@ demand; it is too expensive to do on every sync.
     └── tools/<platform>/.tmp/        # download staging used during updates
 ```
 
-User-facing surface is **only** `TakeOutBack.sh`, `TakeOutBack.bat`, `Incoming/`
-and `Archive/` per the brief.
+User-facing surface is **only** `TakeOutBack.sh`, `TakeOutBack.bat`, `Incoming/`,
+`Archive/` and `Backup/`.
 
 ---
 
@@ -840,7 +781,8 @@ Archives to process: 4
   [===========>                  ] takeout-2025-001-of-002.zip  623/1823 (34%)
 ```
 
-When the run completes, the final summary is printed:
+When the run completes, the final summary is printed, including the paths of
+both new archives:
 
 ```
 TakeOutBack vX.Y.Z
@@ -852,6 +794,8 @@ Skipped files    : 181810
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
+Archive: /path/to/Archive/Consolidated-20260805-123045.123.zip
+Added:   /path/to/Archive/Added-20260805-123045.123.zip
 ```
 
 ### 12.3 CLI surface
@@ -955,6 +899,11 @@ released code:
    release assets and verified by the installer and updater.
 5. **Windows launcher quoting**: the batch file passes `--root "<dir>."` to
    avoid the `"F:\\"` quote-escape bug in `cmd.exe`.
+   6. **Timestamped archives**: consolidated archives are named
+      `Consolidated-YYYYMMDD-HHMMSS.mmm.zip`; each sync also produces an
+      `Added-*.zip` and keeps the previous consolidated archive in `Backup/`.
+   7. **Stale lock detection**: the lockfile stores the PID; the next run checks
+      whether the process is alive before deciding the lock is valid.
 
 ---
 
