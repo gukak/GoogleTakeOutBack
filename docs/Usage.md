@@ -8,7 +8,9 @@
    - Linux: `./TakeOutBack.sh sync`
    - Windows: `TakeOutBack.bat sync`
 4. Watch the live progress: TakeOutBack lists the archives it found, then shows
-   a progress bar for each archive while it is being processed.
+   a progress bar for each archive while it is being processed. On subsequent
+   imports, progress bars are also shown for backing up the current consolidated
+   archive and for copying its existing entries into the new archive.
 5. Read the final summary printed to the console.
 
 TakeOutBack writes the following files:
@@ -75,7 +77,7 @@ which is still readable.
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.4.2
+TakeOutBack v0.4.3
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523

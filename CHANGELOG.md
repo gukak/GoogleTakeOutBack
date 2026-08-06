@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.3] - 2026-08-06
+
+### Added
+- `sync` now shows progress bars for the backup of the current consolidated
+  archive and for copying existing entries into the new consolidated archive.
+- `sync` now prints the number of loaded existing entries before processing.
+- The archive list is printed earlier, before any heavy I/O starts.
+
+### Changed
+- N/A
+
+### Fixed
+- N/A
+
 ## [v0.4.2] - 2026-08-06
 
 ### Changed

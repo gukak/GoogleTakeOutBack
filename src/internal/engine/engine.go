@@ -73,6 +73,8 @@ func Sync(env *app.Env, args []string) error {
 		env.Logf("info", "using custom incoming directory: %s", incomingDir)
 	}
 
+	printArchiveList(incomingFiles)
+
 	lockFile, err := acquireLock(env.LockPath)
 	if err != nil {
 		return err
@@ -104,12 +106,18 @@ func Sync(env *app.Env, args []string) error {
 		return fmt.Errorf("recovery failed: %w", err)
 	}
 
-	existing, existingEntries, err := loadExistingIndex(currentArchive)
-	if err != nil {
-		return err
+	var existing map[string]*zipx.Entry
+	var existingEntries []*zipx.Entry
+	if currentArchive != "" {
+		fmt.Println("Loading existing consolidated archive...")
+		existing, existingEntries, err = loadExistingIndex(currentArchive)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Loaded %d existing entries.\n", len(existingEntries))
+	} else {
+		existing = map[string]*zipx.Entry{}
 	}
-
-	printArchiveList(incomingFiles)
 
 	isInitial := currentArchive == ""
 	ts := time.Now()
@@ -142,18 +150,22 @@ func Sync(env *app.Env, args []string) error {
 
 	// Copy existing entries into the new archive first.
 	if currentArchive != "" {
+		fmt.Printf("Copying %d existing entries into the new archive...\n", len(existingEntries))
 		oldFile, err := os.Open(currentArchive)
 		if err != nil {
 			cleanupSync(newArchiveTmp, addedArchiveTmp)
 			return fmt.Errorf("cannot open current archive: %w", err)
 		}
-		for _, e := range existingEntries {
+		copyBar := newProgressBar(len(existingEntries), "existing entries")
+		for i, e := range existingEntries {
+			copyBar.update(i)
 			if _, err := zipx.CopyRawEntry(newDst, oldFile, e); err != nil {
 				_ = oldFile.Close()
 				cleanupSync(newArchiveTmp, addedArchiveTmp)
 				return fmt.Errorf("cannot copy existing entry %s: %w", e.Name, err)
 			}
 		}
+		copyBar.finish()
 		_ = oldFile.Close()
 	}
 
@@ -412,7 +424,8 @@ func backupArchive(env *app.Env, src string) error {
 		return err
 	}
 	dst := uniqueArchivePath(env.Backup, filepath.Base(src))
-	return copyFile(src, dst)
+	fmt.Println("Backing up current consolidated archive...")
+	return copyFileWithProgress(src, dst)
 }
 
 func copyFile(src, dst string) error {

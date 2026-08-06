@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.2** — the design described here is implemented and
+> Status: **Implemented v0.4.3** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -426,8 +426,8 @@ on its own, so the file body is **self-describing**.
      the recorded PID is alive, abort with a clear message; otherwise treat it as
      stale and remove it.
    - If a current consolidated archive exists, copy it to `Backup/` (or the
-     custom backup directory) before any modification. Keep the 5 most recent
-     backups and remove older ones.
+     custom backup directory) before any modification. Show a byte-based progress
+     bar during the copy. Keep the 5 most recent backups and remove older ones.
 
 3. **Recovery check**
    - Verify the current consolidated archive's EoCD/CD integrity.
@@ -435,7 +435,7 @@ on its own, so the file body is **self-describing**.
 
 4. **Load existing index**
    - Load `IndexExisting` = `path → entry` from the current consolidated archive's
-     central directory (fast: parse CD only).
+     central directory (fast: parse CD only). Print the number of loaded entries.
 
 5. **Build new archives**
    - Create a fresh per-execution directory under the configured temp directory.
@@ -443,7 +443,7 @@ on its own, so the file body is **self-describing**.
      create a temporary `Added-*.zip.tmp`. For the initial import, no Added
      archive is produced.
    - Copy all existing entries from the current archive into the new consolidated
-     temporary file.
+     temporary file. Show an entry-based progress bar during this copy.
    - For each valid incoming archive, render a per-archive progress bar and
      process every entry:
      - Skip unchanged entries (identical CRC and size).
@@ -467,9 +467,9 @@ on its own, so the file body is **self-describing**.
    - Release the lockfile.
    - Remove the per-execution temp directory.
 
-10. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
-    including the paths of the new consolidated archive and, when applicable,
-    the added archive.
+8. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
+   including the paths of the new consolidated archive and, when applicable,
+   the added archive.
 
 ### 6.3 Worst-case complexity
 
@@ -944,7 +944,7 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
-- **v0.4.2** — `verify`, `stats`, interactive menu.
+- **v0.4.3** — `verify`, `stats`, interactive menu.
 - **v0.5.0** — `update` self-updater + checksum verification + release automated
   via Actions (if maintainer enables).
 - **v0.6.0** — `--compact`.

@@ -32,7 +32,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.2/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.3/install.sh | bash
 ```
 
 ### Install on Windows
@@ -40,7 +40,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.2/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.2/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.3/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -52,11 +52,11 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.2/install.
 2. Run the backup command:
    - Linux: `./TakeOutBack.sh sync`
    - Windows: `TakeOutBack.bat sync`
-3. TakeOutBack prints a plan with the space required on each affected disk and
-   asks for confirmation. Add `--yes` to run without prompting.
-4. Watch the progress: each archive is listed, then a progress bar shows the
-   files being processed in real time.
-5. Repeat whenever you have a new Takeout export.
+3. Watch the progress: each archive is listed, then a progress bar shows the
+   files being processed in real time. On subsequent imports you will also see
+   progress bars for the backup of the current archive and for copying the
+   existing entries into the new consolidated archive.
+4. Repeat whenever you have a new Takeout export.
 
 Your consolidated archive lives at `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`
 (the local timestamp is updated on every sync). The first import creates only the
@@ -94,7 +94,7 @@ When the run finishes, the usual summary is printed, including the paths to the
 new consolidated archive and, for subsequent imports, the added-only archive:
 
 ```
-TakeOutBack v0.4.2
+TakeOutBack v0.4.3
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142

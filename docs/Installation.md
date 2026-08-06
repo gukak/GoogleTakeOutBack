@@ -19,20 +19,20 @@ your first release, replace this with your real repository in:
 Open a terminal in the empty directory where you want the project, then run:
 
 ```bash
-curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.2/install.sh | bash
+curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.3/install.sh | bash
 ```
 
 With options:
 
 ```bash
 # Force install into a non-empty directory
-curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.2/install.sh | bash -s -- --force
+curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.3/install.sh | bash -s -- --force
 
 # Install a specific version
-TAKEOUTBACK_VERSION=v0.4.2 curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.2/install.sh | bash
+TAKEOUTBACK_VERSION=v0.4.3 curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.3/install.sh | bash
 
 # Do not download the Windows binary
-TAKEOUTBACK_FETCH_BOTH=0 curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.2/install.sh | bash
+TAKEOUTBACK_FETCH_BOTH=0 curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.4.3/install.sh | bash
 ```
 
 The installer creates the project tree, downloads the Linux binary, optionally
@@ -43,21 +43,21 @@ the Windows binary, verifies SHA-256 checksums, and writes the launcher scripts.
 Open PowerShell in the empty directory where you want the project, then run:
 
 ```powershell
-irm https://github.com/OWNER/REPO/releases/download/v0.4.2/install.ps1 | iex
+irm https://github.com/OWNER/REPO/releases/download/v0.4.3/install.ps1 | iex
 ```
 
 With options:
 
 ```powershell
 # Force install into a non-empty directory
-irm https://github.com/OWNER/REPO/releases/download/v0.4.2/install.ps1 | iex -- -Force
+irm https://github.com/OWNER/REPO/releases/download/v0.4.3/install.ps1 | iex -- -Force
 
 # Install a specific version
-$env:TAKEOUTBACK_VERSION = "v0.4.2"
-irm https://github.com/OWNER/REPO/releases/download/v0.4.2/install.ps1 | iex
+$env:TAKEOUTBACK_VERSION = "v0.4.3"
+irm https://github.com/OWNER/REPO/releases/download/v0.4.3/install.ps1 | iex
 
 # Do not download the Linux binary
-irm https://github.com/OWNER/REPO/releases/download/v0.4.2/install.ps1 | iex -- -NoBoth
+irm https://github.com/OWNER/REPO/releases/download/v0.4.3/install.ps1 | iex -- -NoBoth
 ```
 
 ## Manual Install
