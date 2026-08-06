@@ -72,11 +72,7 @@ func main() {
 			i++
 			continue
 		}
-		if a == "--yes" || a == "--force" {
-			sub = append(sub, a)
-			i++
-			continue
-		}
+
 		if a == "--help" || a == "-h" || a == "help" || a == "--version" || a == "version" {
 			if cmd == "" {
 				cmd = a
@@ -160,13 +156,9 @@ Global options:
 
 Sync options:
   --incoming PATH   Use PATH as the source folder instead of Incoming/
-  --yes             Do not ask for confirmation, run the backup immediately
-  --force           Run the backup even if the space estimate reports
-                    insufficient space
 
-When 'sync' is invoked, TakeOutBack first prints a plan including the space
-required on each affected disk and asks for confirmation. Use --yes to skip
-the prompt, and --force to ignore an insufficient-space warning.`) 
+When 'sync' is invoked, TakeOutBack lists the incoming archives and starts the
+backup immediately.`) 
 }
 
 func menuLoop(env *app.Env) error {

@@ -20,12 +20,8 @@ Google Takeout ZIP exports into a single logical archive history.
   no dependency on system `zip`, `unzip`, Python or other tools.
 - **Self-updating**: built-in updater fetches new binaries from GitHub Releases
   without touching your archives.
-- **Added-only archive**: each subsequent sync produces a companion `Added-*.zip`
-  containing only the files imported during that run. The initial import does not
-  create an Added archive.
-- **Disk-space guard**: before writing anything, `sync` estimates the peak space
-  required on each affected disk and asks for confirmation. Use `--yes` to run
-  unattended.
+- **Added-only archive**: each subsequent sync produces a companion `Added-*.zip` containing
+  only the files imported during that run.
 - **Stale-lock recovery**: if a previous run was killed (Ctrl+C, power loss),
   the next run detects the abandoned lock and resumes safely.
 
@@ -36,7 +32,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.1/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.2/install.sh | bash
 ```
 
 ### Install on Windows
@@ -44,7 +40,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.1/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.1/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.2/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -82,13 +78,6 @@ You can also sync from a different source folder:
 ./TakeOutBack.sh sync --incoming /path/to/other/zips
 ```
 
-If the disk-space estimate reports insufficient space but you still want to run
-the backup, add `--force`:
-
-```bash
-./TakeOutBack.sh sync --force
-```
-
 ### Live progress
 
 During a sync you will see the list of archives and a per-archive progress bar:
@@ -101,24 +90,11 @@ Archives to process: 2
   [===========>                  ] takeout-2025-002.zip  623/1823 (34%)
 ```
 
-When `sync` is invoked, TakeOutBack first shows a plan such as:
-
-```
-Sync plan:
-  Incoming archives: 2, total size: 4.52 GiB
-  Existing consolidated archive: 12.34 GiB
-  Existing added archives: 0 B
-  Estimated peak space required by disk:
-    /path/to/Archive: required 29.70 GiB, free 45.21 GiB [OK]
-  Status: OK
-Proceed with backup? [y/N]
-```
-
 When the run finishes, the usual summary is printed, including the paths to the
 new consolidated archive and, for subsequent imports, the added-only archive:
 
 ```
-TakeOutBack v0.4.1
+TakeOutBack v0.4.2
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142
@@ -135,9 +111,7 @@ Added:   /path/to/Archive/Added-20260805-123045.123.zip
 
 | Command | Description |
 | --- | --- |
-| `sync` | Plan and run the backup consolidation (requires confirmation) |
-| `sync --yes` | Run the backup without confirmation |
-| `sync --force` | Run the backup even if the space estimate is insufficient |
+| `sync` | Consolidate new and changed files from `Incoming/` |
 | `verify` | Check archive integrity |
 | `verify --deep` | Re-decompress every entry and verify CRC32 |
 | `stats` | Show archive statistics |

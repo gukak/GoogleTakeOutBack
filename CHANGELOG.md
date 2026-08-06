@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.2] - 2026-08-06
+
+### Changed
+- Removed all disk-space estimation, warnings and checks before `sync`.
+- Removed `--yes` and `--force` flags; `sync` now runs immediately when invoked.
+- The confirmation prompt is no longer shown; the backup starts right after the
+  archive list.
+
 ## [v0.4.1] - 2026-08-06
 
 ### Added

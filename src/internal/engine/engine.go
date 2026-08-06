@@ -3,7 +3,6 @@
 package engine
 
 import (
-	"bufio"
 	"compress/flate"
 	"fmt"
 	"hash/crc32"
@@ -39,8 +38,6 @@ func Sync(env *app.Env, args []string) error {
 	env.Logf("info", "starting sync, version=%s", app.Version)
 
 	incomingDir := env.Incoming
-	yesFlag := false
-	forceFlag := false
 	i := 0
 	for i < len(args) {
 		if args[i] == "--incoming" && i+1 < len(args) {
@@ -50,16 +47,6 @@ func Sync(env *app.Env, args []string) error {
 		}
 		if strings.HasPrefix(args[i], "--incoming=") {
 			incomingDir = strings.TrimPrefix(args[i], "--incoming=")
-			i++
-			continue
-		}
-		if args[i] == "--yes" {
-			yesFlag = true
-			i++
-			continue
-		}
-		if args[i] == "--force" {
-			forceFlag = true
 			i++
 			continue
 		}
@@ -84,31 +71,6 @@ func Sync(env *app.Env, args []string) error {
 	}
 	if incomingDir != env.Incoming {
 		env.Logf("info", "using custom incoming directory: %s", incomingDir)
-	}
-
-	plan, err := buildSyncPlan(env, currentArchive, incomingFiles)
-	if err != nil {
-		return fmt.Errorf("cannot evaluate disk space: %w", err)
-	}
-	printPlan(env, plan, incomingDir)
-
-	if !plan.HasEnoughSpace {
-		if forceFlag {
-			env.Logf("warn", "disk space estimate reports insufficient space; continuing because --force was given")
-			fmt.Println("Warning: disk space estimate reports insufficient space. Continuing because --force was given.")
-		} else {
-			return fmt.Errorf("not enough free space; backup cancelled")
-		}
-	}
-
-	if !yesFlag && !forceFlag {
-		ok, err := confirm("Proceed with backup? [y/N] ")
-		if err != nil {
-			return fmt.Errorf("cannot read confirmation: %w", err)
-		}
-		if !ok {
-			return fmt.Errorf("backup cancelled by user")
-		}
 	}
 
 	lockFile, err := acquireLock(env.LockPath)
@@ -648,191 +610,6 @@ func formatDuration(d time.Duration) string {
 	m := (d % time.Hour) / time.Minute
 	s := (d % time.Minute) / time.Second
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
-}
-
-// syncPlan estimates the space required for a sync operation per disk.
-type syncPlan struct {
-	IncomingCount       int
-	IncomingSize        int64
-	ExistingArchiveSize int64
-	ExistingAddedSize   int64
-	RequiredByDisk      map[string]diskRequirement
-	HasEnoughSpace      bool
-}
-
-type diskRequirement struct {
-	Path     string
-	Free     uint64
-	Required int64
-}
-
-// sameDisk reports whether two paths are on the same filesystem.
-func sameDisk(a, b string) bool {
-	ka, err := diskKey(a)
-	if err != nil {
-		return false
-	}
-	kb, err := diskKey(b)
-	if err != nil {
-		return false
-	}
-	return ka == kb
-}
-
-// buildSyncPlan evaluates the peak space required for the sync per disk.
-// The incoming ZIP files are only read, so the incoming disk is not counted.
-// The estimate takes into account which directories (Archive, Backup, Temp)
-// share the same filesystem.
-func buildSyncPlan(env *app.Env, currentArchive string, incomingFiles []string) (*syncPlan, error) {
-	plan := &syncPlan{
-		IncomingCount:  len(incomingFiles),
-		RequiredByDisk: make(map[string]diskRequirement),
-	}
-	for _, p := range incomingFiles {
-		st, err := os.Stat(p)
-		if err != nil {
-			return nil, fmt.Errorf("cannot stat incoming archive %s: %w", p, err)
-		}
-		plan.IncomingSize += st.Size()
-	}
-	if currentArchive != "" {
-		st, err := os.Stat(currentArchive)
-		if err != nil {
-			return nil, fmt.Errorf("cannot stat current archive %s: %w", currentArchive, err)
-		}
-		plan.ExistingArchiveSize = st.Size()
-	}
-	addedFiles, err := filepath.Glob(filepath.Join(env.Archive, "Added-*.zip"))
-	if err != nil {
-		return nil, fmt.Errorf("cannot list added archives: %w", err)
-	}
-	for _, p := range addedFiles {
-		st, err := os.Stat(p)
-		if err != nil {
-			return nil, fmt.Errorf("cannot stat added archive %s: %w", p, err)
-		}
-		plan.ExistingAddedSize += st.Size()
-	}
-
-	const buffer = 100 * 1024 * 1024 // 100 MiB safety margin
-
-	isInitial := plan.ExistingArchiveSize == 0
-	newAddedSize := int64(0)
-	if !isInitial {
-		newAddedSize = plan.IncomingSize
-	}
-	newConsolidatedSize := plan.ExistingArchiveSize + plan.IncomingSize
-	// Temp file: the new consolidated archive plus a possible Added archive.
-	tempSize := newConsolidatedSize + newAddedSize
-	// Final files in Archive: the new consolidated archive plus existing Added
-	// archives plus a possible new Added archive.
-	finalSize := newConsolidatedSize + plan.ExistingAddedSize + newAddedSize
-	// Base: what already exists in Archive before the operation starts.
-	baseSize := plan.ExistingArchiveSize + plan.ExistingAddedSize
-
-	// Archive disk peak. If Temp is on the same filesystem, the temporary file is
-	// created there (and then renamed). The peak is the existing Archive content
-	// plus the temporary file. If Temp is elsewhere, the peak is the existing
-	// content plus the final files.
-	archiveNeed := baseSize
-	if sameDisk(env.TempDir, env.Archive) {
-		archiveNeed += tempSize
-	} else {
-		archiveNeed += finalSize
-	}
-	// If Backup is also on the Archive filesystem, account for the backup copy.
-	if plan.ExistingArchiveSize > 0 && sameDisk(env.Backup, env.Archive) {
-		archiveNeed += plan.ExistingArchiveSize
-	}
-	if err := addDiskRequirement(plan, env.Archive, archiveNeed, buffer); err != nil {
-		return nil, err
-	}
-
-	// Backup disk: copy of the current consolidated archive (unless already counted
-	// because it shares the Archive filesystem).
-	if plan.ExistingArchiveSize > 0 && !sameDisk(env.Backup, env.Archive) {
-		backupNeed := plan.ExistingArchiveSize
-		if err := addDiskRequirement(plan, env.Backup, backupNeed, buffer); err != nil {
-			return nil, err
-		}
-	}
-
-	// Temp disk: the temporary files, unless Temp is on the Archive filesystem.
-	if !sameDisk(env.TempDir, env.Archive) {
-		tempNeed := tempSize
-		if err := addDiskRequirement(plan, env.TempDir, tempNeed, buffer); err != nil {
-			return nil, err
-		}
-	}
-
-	plan.HasEnoughSpace = true
-	for _, req := range plan.RequiredByDisk {
-		if req.Required > int64(req.Free) {
-			plan.HasEnoughSpace = false
-		}
-	}
-	return plan, nil
-}
-
-func addDiskRequirement(plan *syncPlan, path string, required int64, buffer int64) error {
-	key, err := diskKey(path)
-	if err != nil {
-		return fmt.Errorf("cannot identify disk for %s: %w", path, err)
-	}
-	req := plan.RequiredByDisk[key]
-	if req.Path == "" {
-		req.Path = path
-		free, err := freeSpace(path)
-		if err != nil {
-			return fmt.Errorf("cannot read free space for %s: %w", path, err)
-		}
-		req.Free = free
-		req.Required += buffer
-	}
-	req.Required += required
-	plan.RequiredByDisk[key] = req
-	return nil
-}
-
-func printPlan(env *app.Env, plan *syncPlan, incomingDir string) {
-	fmt.Println("Sync plan:")
-	fmt.Printf("  Incoming directory: %s\n", incomingDir)
-	fmt.Printf("  Incoming archives: %d, total size: %s\n", plan.IncomingCount, humanSize(plan.IncomingSize))
-	fmt.Printf("  Archive directory:  %s\n", env.Archive)
-	fmt.Printf("  Backup directory:   %s\n", env.Backup)
-	fmt.Printf("  Temp directory:     %s\n", env.TempDir)
-	if plan.ExistingArchiveSize > 0 {
-		fmt.Printf("  Existing consolidated archive: %s\n", humanSize(plan.ExistingArchiveSize))
-	} else {
-		fmt.Println("  No existing consolidated archive (initial import)")
-	}
-	if plan.ExistingAddedSize > 0 {
-		fmt.Printf("  Existing added archives: %s\n", humanSize(plan.ExistingAddedSize))
-	}
-	fmt.Println("  Estimated peak space required by disk:")
-	for _, req := range plan.RequiredByDisk {
-		status := "OK"
-		if req.Required > int64(req.Free) {
-			status = "INSUFFICIENT"
-		}
-		fmt.Printf("    %s: required %s, free %s [%s]\n", req.Path, humanSize(req.Required), humanSize(int64(req.Free)), status)
-	}
-	if plan.HasEnoughSpace {
-		fmt.Println("  Status: OK")
-	} else {
-		fmt.Println("  Status: INSUFFICIENT SPACE")
-	}
-}
-
-func confirm(prompt string) (bool, error) {
-	fmt.Print(prompt)
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return false, err
-	}
-	line = strings.TrimSpace(strings.ToLower(line))
-	return line == "y" || line == "yes", nil
 }
 
 // recoverArchive validates and, if necessary, repairs the consolidated archive.

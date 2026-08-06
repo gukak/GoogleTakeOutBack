@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.1** — the design described here is implemented and
+> Status: **Implemented v0.4.2** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -418,24 +418,10 @@ on its own, so the file body is **self-describing**.
      interrupted run.
    - Remove any leftover `*.tmp`, `*.rebuild` or `*.compact` files in the archive
      directory.
-
-2. **Plan and confirm**
    - Discover incoming archives (`Incoming/*.zip` by default, or `--incoming`).
-   - Compute a peak-space estimate for each disk affected by the archive, backup
-     and temp directories. The incoming ZIP files are only read, so the incoming
-     disk is not counted. The estimate accounts for which directories share a
-     filesystem and for:
-     - the existing consolidated archive (kept during the operation),
-     - the total volume of the incoming ZIP files,
-     - existing `Added-*.zip` archives,
-     - a worst-case new `Added-*.zip` for subsequent imports,
-     - a backup copy of the current consolidated archive.
-   - Print the plan and ask for confirmation. If `--yes` was passed, skip the
-     prompt. If `--force` was passed, continue even when the estimate reports
-     insufficient space. Otherwise, abort if the user declines or if free space
-     is insufficient.
+     Print a numbered list of the archives that will be processed.
 
-3. **Acquire lock and backup**
+2. **Acquire lock and backup**
    - Acquire a cross-run lockfile `Archive/.consolidated.lock`. If it exists and
      the recorded PID is alive, abort with a clear message; otherwise treat it as
      stale and remove it.
@@ -443,20 +429,15 @@ on its own, so the file body is **self-describing**.
      custom backup directory) before any modification. Keep the 5 most recent
      backups and remove older ones.
 
-4. **Recovery check**
+3. **Recovery check**
    - Verify the current consolidated archive's EoCD/CD integrity.
    - If inconsistent, run **Recovery** (§9) before proceeding.
 
-5. **Load existing index**
+4. **Load existing index**
    - Load `IndexExisting` = `path → entry` from the current consolidated archive's
      central directory (fast: parse CD only).
 
-6. **Discover incoming archives**
-   - Glob `Incoming/*.zip` (or the custom incoming directory).
-   - For each candidate, probe by opening it; if it fails, log a warning and skip.
-   - Print a numbered list of the archives that will be processed.
-
-7. **Build new archives**
+5. **Build new archives**
    - Create a fresh per-execution directory under the configured temp directory.
    - Create the temporary consolidated archive. For subsequent imports, also
      create a temporary `Added-*.zip.tmp`. For the initial import, no Added
@@ -474,14 +455,14 @@ on its own, so the file body is **self-describing**.
    - Write the central directory and EoCD to the temporary consolidated archive
      and, when applicable, to the temporary Added archive.
 
-8. **Atomic switch**
+6. **Atomic switch**
    - `fsync` and close the temporary files.
    - Rename them to their final `Archive/Consolidated-*.zip` and, when applicable,
      `Archive/Added-*.zip` names.
    - Remove the previous consolidated archive from `Archive/` (it is already in
      `Backup/`).
 
-9. **Finalize state and cleanup**
+7. **Finalize state and cleanup**
    - Write `Archive/state.json` and `Archive/cd.bak` atomically.
    - Release the lockfile.
    - Remove the per-execution temp directory.
@@ -963,7 +944,7 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
-- **v0.4.1** — `verify`, `stats`, interactive menu.
+- **v0.4.2** — `verify`, `stats`, interactive menu.
 - **v0.5.0** — `update` self-updater + checksum verification + release automated
   via Actions (if maintainer enables).
 - **v0.6.0** — `--compact`.

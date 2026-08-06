@@ -7,12 +7,9 @@
 3. Run the backup command:
    - Linux: `./TakeOutBack.sh sync`
    - Windows: `TakeOutBack.bat sync`
-4. Review the sync plan: TakeOutBack estimates the peak space required on each
-   affected disk and asks for confirmation before writing anything. Add `--yes`
-   to skip the prompt.
-5. Watch the live progress: TakeOutBack lists the archives it found, then shows
+4. Watch the live progress: TakeOutBack lists the archives it found, then shows
    a progress bar for each archive while it is being processed.
-6. Read the final summary printed to the console.
+5. Read the final summary printed to the console.
 
 TakeOutBack writes the following files:
 
@@ -49,7 +46,7 @@ If you want to import from a different folder than `Incoming/`, use the
 ./TakeOutBack.sh sync --incoming=/path/to/other/zips
 ```
 
-7. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
+6. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
    folder) if you want to free space. TakeOutBack never deletes incoming files
    automatically.
 
@@ -75,24 +72,10 @@ which is still readable.
 
 ## Understanding the Summary
 
-Before writing anything, `sync` shows a plan with the space required on each
-affected disk:
-
-```
-Sync plan:
-  Incoming archives: 4, total size: 4.52 GiB
-  Existing consolidated archive: 12.34 GiB
-  Existing added archives: 0 B
-  Estimated peak space required by disk:
-    /path/to/Archive: required 29.70 GiB, free 45.21 GiB [OK]
-  Status: OK
-Proceed with backup? [y/N]
-```
-
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.4.1
+TakeOutBack v0.4.2
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523
@@ -149,20 +132,6 @@ forever.
 
 Running `./TakeOutBack.sh` without arguments now shows the help and does **not**
 start a backup automatically. You must explicitly use the `sync` command.
-
-To run the backup without the confirmation prompt (for scripts or cron jobs):
-
-```bash
-./TakeOutBack.sh sync --yes
-```
-
-To run the backup even when the disk-space estimate reports insufficient space:
-
-```bash
-./TakeOutBack.sh sync --force
-```
-
-`--force` also implies `--yes` (no confirmation prompt).
 
 ### Verify
 
