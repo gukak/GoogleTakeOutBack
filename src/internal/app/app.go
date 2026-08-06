@@ -86,6 +86,13 @@ func DefaultPolicy() Policy {
 	}
 }
 
+// EnvOptions configures the runtime environment.
+type EnvOptions struct {
+	Root      string
+	TempDir   string
+	BackupDir string
+}
+
 // Env holds the resolved project layout and runtime services.
 type Env struct {
 	Root      string
@@ -109,18 +116,23 @@ type Env struct {
 }
 
 // NewEnv resolves the project root from the executable or the explicit flag.
-func NewEnv(rootFlag string) (*Env, error) {
-	root, err := resolveRoot(rootFlag)
+// Optional TempDir and BackupDir override the default layout.
+func NewEnv(opts EnvOptions) (*Env, error) {
+	root, err := resolveRoot(opts.Root)
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureLayout(root); err != nil {
-		return nil, err
-	}
+
 	e := &Env{Root: root}
 	e.Incoming = filepath.Join(root, IncomingDir)
 	e.Archive = filepath.Join(root, ArchiveDir)
-	e.Backup = filepath.Join(root, BackupDir)
+	if opts.BackupDir != "" {
+		if e.Backup, err = filepath.Abs(opts.BackupDir); err != nil {
+			return nil, fmt.Errorf("cannot resolve backup directory %q: %w", opts.BackupDir, err)
+		}
+	} else {
+		e.Backup = filepath.Join(root, BackupDir)
+	}
 	e.StatePath = filepath.Join(e.Archive, StateName)
 	e.BackupCD = filepath.Join(e.Archive, BackupCDName)
 	e.LockPath = filepath.Join(e.Archive, LockName)
@@ -129,9 +141,18 @@ func NewEnv(rootFlag string) (*Env, error) {
 	e.ToolsWin = filepath.Join(e.AppRoot, ToolsDir, "windows", WindowsBinaryName)
 	e.ConfigDir = filepath.Join(e.AppRoot, ConfigDir)
 	e.LogsDir = filepath.Join(e.AppRoot, LogsDir)
-	e.TempDir = filepath.Join(e.AppRoot, TempDir)
+	if opts.TempDir != "" {
+		if e.TempDir, err = filepath.Abs(opts.TempDir); err != nil {
+			return nil, fmt.Errorf("cannot resolve temp directory %q: %w", opts.TempDir, err)
+		}
+	} else {
+		e.TempDir = filepath.Join(e.AppRoot, TempDir)
+	}
 	e.logStart = time.Now()
 
+	if err := ensureLayout(root, e.Backup, e.TempDir); err != nil {
+		return nil, err
+	}
 	if err := e.loadSettings(); err != nil {
 		return nil, err
 	}
@@ -142,6 +163,11 @@ func NewEnv(rootFlag string) (*Env, error) {
 		return nil, err
 	}
 	return e, nil
+}
+
+// NewEnvRoot is a convenience wrapper for callers that only need to override the root.
+func NewEnvRoot(root string) (*Env, error) {
+	return NewEnv(EnvOptions{Root: root})
 }
 
 // Close finalizes the runtime environment.
@@ -227,17 +253,17 @@ func hasRootMarkers(d string) bool {
 	return true
 }
 
-func ensureLayout(root string) error {
+func ensureLayout(root, backupDir, tempDir string) error {
 	dirs := []string{
 		filepath.Join(root, IncomingDir),
 		filepath.Join(root, ArchiveDir),
-		filepath.Join(root, BackupDir),
+		backupDir,
 		filepath.Join(root, AppDir),
 		filepath.Join(root, AppDir, ToolsDir, "linux"),
 		filepath.Join(root, AppDir, ToolsDir, "windows"),
 		filepath.Join(root, AppDir, ConfigDir),
 		filepath.Join(root, AppDir, LogsDir),
-		filepath.Join(root, AppDir, TempDir),
+		tempDir,
 		filepath.Join(root, AppDir, ScriptsDir),
 		filepath.Join(root, AppDir, DocsDir),
 	}

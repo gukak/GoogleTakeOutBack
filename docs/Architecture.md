@@ -409,63 +409,82 @@ on its own, so the file body is **self-describing**.
 1. **Startup**
    - Resolve project root; verify `Incoming/`, `Archive/`, `Backup/`,
      `TakeOutBack/{tools,config,logs,temp}` exist; create missing.
+     Optional `--temp-dir PATH` and `--backup-dir PATH` override the default
+     `TakeOutBack/temp` and `Backup` directories.
    - Determine the current consolidated archive by scanning `Archive/` for the
      lexicographically greatest `Consolidated-*.zip` name (timestamp format is
      sortable; timestamps are in local time).
-   - Remove any leftover per-execution temp directories `TakeOutBack/temp/run-*`
-     from a previously interrupted run.
+   - Remove any leftover per-execution temp directories from a previously
+     interrupted run.
    - Remove any leftover `*.tmp`, `*.rebuild` or `*.compact` files in `Archive/`.
+
+2. **Plan and confirm**
+   - Discover incoming archives (`Incoming/*.zip` by default, or `--incoming`).
+   - Compute a conservative peak-space estimate for each disk affected by
+     `Archive/`, `Backup/` (or the custom backup directory) and the temp
+     directory. The estimate accounts for:
+     - the existing consolidated archive (kept during the operation),
+     - the total volume of the incoming ZIP files,
+     - existing `Added-*.zip` archives,
+     - a worst-case new `Added-*.zip`,
+     - a backup copy of the current consolidated archive.
+   - Print the plan and ask for confirmation. If `--yes` was passed, skip the
+     prompt. Abort if the user declines or if free space is insufficient.
+
+3. **Acquire lock and backup**
    - Acquire a cross-run lockfile `Archive/.consolidated.lock`. If it exists and
      the recorded PID is alive, abort with a clear message; otherwise treat it as
      stale and remove it.
+   - If a current consolidated archive exists, copy it to `Backup/` (or the
+     custom backup directory) before any modification. Keep the 5 most recent
+     backups and remove older ones.
 
-2. **Backup previous archive**
-   - If a current consolidated archive exists, copy it to `Backup/` before any
-     modification. Keep the 5 most recent backups and remove older ones.
-
-3. **Recovery check**
+4. **Recovery check**
    - Verify the current consolidated archive's EoCD/CD integrity.
    - If inconsistent, run **Recovery** (§9) before proceeding.
 
-4. **Load existing index**
+5. **Load existing index**
    - Load `IndexExisting` = `path → entry` from the current consolidated archive's
      central directory (fast: parse CD only).
 
-5. **Discover incoming archives**
-   - Glob `Incoming/*.zip`.
+6. **Discover incoming archives**
+   - Glob `Incoming/*.zip` (or the custom incoming directory).
    - For each candidate, probe by opening it; if it fails, log a warning and skip.
    - Print a numbered list of the archives that will be processed.
 
-6. **Build new archives**
-   - Create a fresh per-execution directory `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/`.
-   - Create two temporary files inside that directory:
-     - `Consolidated-YYYYMMDD-HHMMSS.mmm.zip.tmp`
-     - `Added-YYYYMMDD-HHMMSS.mmm.zip.tmp`
+7. **Build new archives**
+   - Create a fresh per-execution directory under the configured temp directory.
+   - Create the temporary consolidated archive. For subsequent imports, also
+     create a temporary `Added-*.zip.tmp`. For the initial import, no Added
+     archive is produced.
    - Copy all existing entries from the current archive into the new consolidated
      temporary file.
    - For each valid incoming archive, render a per-archive progress bar and
      process every entry:
      - Skip unchanged entries (identical CRC and size).
-     - For new entries, write them to both the new consolidated archive and the
-       `Added` archive.
-     - For modified entries, write the versioned name (`name__vN.ext`) to both
-       archives.
-   - Write the central directory and EoCD to both temporary files.
+     - For new entries, write them to the new consolidated archive and, for
+       subsequent imports, to the `Added` archive.
+     - For modified entries, write the versioned name (`name__vN.ext`) to the
+       new consolidated archive and, for subsequent imports, to the `Added`
+       archive.
+   - Write the central directory and EoCD to the temporary consolidated archive
+     and, when applicable, to the temporary Added archive.
 
-7. **Atomic switch**
-   - `fsync` both temporary files.
-   - Rename them to their final `Archive/Consolidated-*.zip` and
+8. **Atomic switch**
+   - `fsync` and close the temporary files.
+   - Rename them to their final `Archive/Consolidated-*.zip` and, when applicable,
      `Archive/Added-*.zip` names.
    - Remove the previous consolidated archive from `Archive/` (it is already in
      `Backup/`).
 
-8. **Finalize state and cleanup**
+9. **Finalize state and cleanup**
    - Write `Archive/state.json` and `Archive/cd.bak` atomically.
    - Release the lockfile.
    - Remove the per-execution temp directory.
 
-9. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
-   including the paths of the new consolidated and added archives.
+10. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
+    including the paths of the new consolidated archive and, when applicable,
+    the added archive.
 
 ### 6.3 Worst-case complexity
 

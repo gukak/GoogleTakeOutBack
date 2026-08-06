@@ -20,8 +20,12 @@ Google Takeout ZIP exports into a single logical archive history.
   no dependency on system `zip`, `unzip`, Python or other tools.
 - **Self-updating**: built-in updater fetches new binaries from GitHub Releases
   without touching your archives.
-- **Added-only archive**: each sync produces a companion `Added-*.zip` containing
-  only the files imported during that run.
+- **Added-only archive**: each subsequent sync produces a companion `Added-*.zip`
+  containing only the files imported during that run. The initial import does not
+  create an Added archive.
+- **Disk-space guard**: before writing anything, `sync` estimates the peak space
+  required on each affected disk and asks for confirmation. Use `--yes` to run
+  unattended.
 - **Stale-lock recovery**: if a previous run was killed (Ctrl+C, power loss),
   the next run detects the abandoned lock and resumes safely.
 
@@ -49,26 +53,33 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.3.9/install.
 ### Use
 
 1. Place your Google Takeout ZIP files in the `Incoming/` folder.
-2. Run the launcher:
-   - Linux: `./TakeOutBack.sh`
-   - Windows: `TakeOutBack.bat`
-3. Watch the progress: each archive is listed, then a progress bar shows the
+2. Run the backup command:
+   - Linux: `./TakeOutBack.sh sync`
+   - Windows: `TakeOutBack.bat sync`
+3. TakeOutBack prints a plan with the space required on each affected disk and
+   asks for confirmation. Add `--yes` to run without prompting.
+4. Watch the progress: each archive is listed, then a progress bar shows the
    files being processed in real time.
-4. Repeat whenever you have a new Takeout export.
+5. Repeat whenever you have a new Takeout export.
 
 Your consolidated archive lives at `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`
-(the local timestamp is updated on every sync). A companion
-`Added-YYYYMMDD-HHMMSS.mmm.zip` contains only the files imported during that sync,
-and the previous consolidated archive is copied to `Backup/` before being replaced.
+(the local timestamp is updated on every sync). The first import creates only the
+consolidated archive. Every later sync also produces a companion
+`Added-YYYYMMDD-HHMMSS.mmm.zip` with only the files imported during that run, and
+copies the previous consolidated archive to `Backup/` before replacing it.
 
-All temporary work happens inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` and
-is cleaned up automatically, so `Archive/` only ever contains the final
-`Consolidated-*.zip`, `Added-*.zip`, and tiny sidecar files.
+All temporary work happens inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` by
+default. You can override the temp directory and the backup directory from the
+command line:
+
+```bash
+./TakeOutBack.sh sync --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
+```
 
 You can also sync from a different source folder:
 
 ```bash
-./TakeOutBack.sh --incoming /path/to/other/zips
+./TakeOutBack.sh sync --incoming /path/to/other/zips
 ```
 
 ### Live progress
@@ -83,8 +94,21 @@ Archives to process: 2
   [===========>                  ] takeout-2025-002.zip  623/1823 (34%)
 ```
 
-When the run finishes, the usual summary is printed, including the paths to
-both the new consolidated archive and the added-only archive:
+When `sync` is invoked, TakeOutBack first shows a plan such as:
+
+```
+Sync plan:
+  Incoming archives: 2, total size: 4.52 GiB
+  Existing consolidated archive: 12.34 GiB
+  Existing added archives: 0 B
+  Estimated peak space required by disk:
+    /path/to/Archive: required 29.70 GiB, free 45.21 GiB [OK]
+  Status: OK
+Proceed with backup? [y/N]
+```
+
+When the run finishes, the usual summary is printed, including the paths to the
+new consolidated archive and, for subsequent imports, the added-only archive:
 
 ```
 TakeOutBack v0.3.9
@@ -104,13 +128,15 @@ Added:   /path/to/Archive/Added-20260805-123045.123.zip
 
 | Command | Description |
 | --- | --- |
-| `sync` (default) | Consolidate new and changed files from `Incoming/` |
+| `sync` | Plan and run the backup consolidation (requires confirmation) |
+| `sync --yes` | Run the backup without confirmation |
 | `verify` | Check archive integrity |
 | `verify --deep` | Re-decompress every entry and verify CRC32 |
 | `stats` | Show archive statistics |
 | `compact` | Rewrite archive to remove dead central-directory blocks |
 | `update` | Update the binary from GitHub Releases |
 | `menu` | Interactive menu |
+| `--help` | Show available commands and options |
 
 ## How It Works
 

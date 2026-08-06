@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"bufio"
 	"compress/flate"
 	"fmt"
 	"hash/crc32"
@@ -38,6 +39,7 @@ func Sync(env *app.Env, args []string) error {
 	env.Logf("info", "starting sync, version=%s", app.Version)
 
 	incomingDir := env.Incoming
+	yesFlag := false
 	i := 0
 	for i < len(args) {
 		if args[i] == "--incoming" && i+1 < len(args) {
@@ -50,6 +52,11 @@ func Sync(env *app.Env, args []string) error {
 			i++
 			continue
 		}
+		if args[i] == "--yes" {
+			yesFlag = true
+			i++
+			continue
+		}
 		i++
 	}
 
@@ -58,6 +65,39 @@ func Sync(env *app.Env, args []string) error {
 	}
 	if _, err := os.Stat(incomingDir); err != nil {
 		return fmt.Errorf("cannot access incoming directory %s: %w", incomingDir, err)
+	}
+
+	currentArchive, err := env.CurrentArchive()
+	if err != nil {
+		return fmt.Errorf("cannot locate current archive: %w", err)
+	}
+
+	incomingFiles, err := discoverIncoming(incomingDir)
+	if err != nil {
+		return err
+	}
+	if incomingDir != env.Incoming {
+		env.Logf("info", "using custom incoming directory: %s", incomingDir)
+	}
+
+	plan, err := buildSyncPlan(env, currentArchive, incomingFiles)
+	if err != nil {
+		return fmt.Errorf("cannot evaluate disk space: %w", err)
+	}
+	printPlan(env, plan)
+
+	if !plan.HasEnoughSpace {
+		return fmt.Errorf("not enough free space; backup cancelled")
+	}
+
+	if !yesFlag {
+		ok, err := confirm("Proceed with backup? [y/N] ")
+		if err != nil {
+			return fmt.Errorf("cannot read confirmation: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("backup cancelled by user")
+		}
 	}
 
 	lockFile, err := acquireLock(env.LockPath)
@@ -75,12 +115,7 @@ func Sync(env *app.Env, args []string) error {
 	// Ensure Archive/ only contains final Consolidated and Added zips.
 	cleanupArchiveTempFiles(env.Archive)
 
-	report := &Report{}
-
-	currentArchive, err := env.CurrentArchive()
-	if err != nil {
-		return fmt.Errorf("cannot locate current archive: %w", err)
-	}
+	report := &Report{ArchivesScanned: len(incomingFiles)}
 
 	// Backup the current consolidated archive before modifying anything.
 	if currentArchive != "" {
@@ -101,34 +136,32 @@ func Sync(env *app.Env, args []string) error {
 		return err
 	}
 
-	incomingFiles, err := discoverIncoming(incomingDir)
-	if err != nil {
-		return err
-	}
-	report.ArchivesScanned = len(incomingFiles)
-	if incomingDir != env.Incoming {
-		env.Logf("info", "using custom incoming directory: %s", incomingDir)
-	}
-
 	printArchiveList(incomingFiles)
 
+	isInitial := currentArchive == ""
 	ts := time.Now()
 	newArchiveName := timestampName("Consolidated", ts)
-	addedArchiveName := timestampName("Added", ts)
 	newArchivePath := uniqueArchivePath(env.Archive, newArchiveName)
-	addedArchivePath := uniqueArchivePath(env.Archive, addedArchiveName)
 	newArchiveTmp := filepath.Join(runDir, newArchiveName+".tmp")
-	addedArchiveTmp := filepath.Join(runDir, addedArchiveName+".tmp")
 
 	newDst, err := zipx.OpenOrCreate(newArchiveTmp)
 	if err != nil {
 		return fmt.Errorf("cannot create new archive: %w", err)
 	}
-	addedDst, err := zipx.OpenOrCreate(addedArchiveTmp)
-	if err != nil {
-		_ = newDst.Close()
-		cleanupSync(newArchiveTmp)
-		return fmt.Errorf("cannot create added archive: %w", err)
+
+	var addedDst *os.File
+	var addedArchivePath, addedArchiveTmp string
+	var addedEntries []*zipx.Entry
+	if !isInitial {
+		addedArchiveName := timestampName("Added", ts)
+		addedArchivePath = uniqueArchivePath(env.Archive, addedArchiveName)
+		addedArchiveTmp = filepath.Join(runDir, addedArchiveName+".tmp")
+		addedDst, err = zipx.OpenOrCreate(addedArchiveTmp)
+		if err != nil {
+			_ = newDst.Close()
+			cleanupSync(newArchiveTmp)
+			return fmt.Errorf("cannot create added archive: %w", err)
+		}
 	}
 
 	var allEntries []*zipx.Entry
@@ -151,7 +184,6 @@ func Sync(env *app.Env, args []string) error {
 		_ = oldFile.Close()
 	}
 
-	var addedEntries []*zipx.Entry
 	appended := false
 
 	for _, path := range incomingFiles {
@@ -196,12 +228,14 @@ func Sync(env *app.Env, args []string) error {
 			existing[app.NormalizeKey(written.Name)] = written
 			appended = true
 
-			// Copy the same entry to the Added archive.
-			added, err := zipx.CopyRawEntry(addedDst, src.File, e)
-			if err != nil {
-				env.Logf("warn", "cannot copy added entry %s: %v", e.Name, err)
-			} else {
-				addedEntries = append(addedEntries, added)
+			// Copy the same entry to the Added archive only for subsequent imports.
+			if addedDst != nil {
+				added, err := zipx.CopyRawEntry(addedDst, src.File, e)
+				if err != nil {
+					env.Logf("warn", "cannot copy added entry %s: %v", e.Name, err)
+				} else {
+					addedEntries = append(addedEntries, added)
+				}
 			}
 			env.Logf("info", "appended %s (%d bytes compressed)", written.Name, written.CompressedSize)
 		}
@@ -211,7 +245,9 @@ func Sync(env *app.Env, args []string) error {
 
 	if !appended {
 		_ = newDst.Close()
-		_ = addedDst.Close()
+		if addedDst != nil {
+			_ = addedDst.Close()
+		}
 		cleanupSync(newArchiveTmp, addedArchiveTmp)
 		env.Log("info", "no new or modified files to append")
 		printReport(env, report, start)
@@ -237,10 +273,12 @@ func Sync(env *app.Env, args []string) error {
 		return err
 	}
 
-	// Write the Added archive.
-	if err := writeAddedArchive(addedDst, addedEntries); err != nil {
-		cleanupSync(newArchiveTmp, addedArchiveTmp)
-		return fmt.Errorf("write added archive: %w", err)
+	// Write the Added archive only for subsequent imports.
+	if addedDst != nil {
+		if err := writeAddedArchive(addedDst, addedEntries); err != nil {
+			cleanupSync(newArchiveTmp, addedArchiveTmp)
+			return fmt.Errorf("write added archive: %w", err)
+		}
 	}
 
 	// Move temporary files to their final timestamped names.
@@ -248,10 +286,12 @@ func Sync(env *app.Env, args []string) error {
 		cleanupSync(newArchiveTmp, addedArchiveTmp)
 		return fmt.Errorf("rename new archive: %w", err)
 	}
-	if err := os.Rename(addedArchiveTmp, addedArchivePath); err != nil {
-		_ = os.Remove(newArchivePath)
-		cleanupSync(newArchiveTmp, addedArchiveTmp)
-		return fmt.Errorf("rename added archive: %w", err)
+	if addedDst != nil {
+		if err := os.Rename(addedArchiveTmp, addedArchivePath); err != nil {
+			_ = os.Remove(newArchivePath)
+			cleanupSync(newArchiveTmp, addedArchiveTmp)
+			return fmt.Errorf("rename added archive: %w", err)
+		}
 	}
 
 	// The old consolidated archive is now superseded; remove it from Archive
@@ -288,8 +328,10 @@ func Sync(env *app.Env, args []string) error {
 	report.Duration = time.Since(start)
 	printReport(env, report, start)
 	env.Summary("Archive: %s", newArchivePath)
-	env.Summary("Added:   %s", addedArchivePath)
-	env.Logf("info", "sync completed in %s, archive=%s, added=%s", report.Duration, newArchivePath, addedArchivePath)
+	if addedArchivePath != "" {
+		env.Summary("Added:   %s", addedArchivePath)
+	}
+	env.Logf("info", "sync completed in %s, archive=%s", report.Duration, newArchivePath)
 	return nil
 }
 
@@ -595,6 +637,146 @@ func formatDuration(d time.Duration) string {
 	m := (d % time.Hour) / time.Minute
 	s := (d % time.Minute) / time.Second
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+}
+
+// syncPlan estimates the space required for a sync operation per disk.
+type syncPlan struct {
+	IncomingCount       int
+	IncomingSize        int64
+	ExistingArchiveSize int64
+	ExistingAddedSize   int64
+	RequiredByDisk      map[string]diskRequirement
+	HasEnoughSpace      bool
+}
+
+type diskRequirement struct {
+	Path     string
+	Free     uint64
+	Required int64
+}
+
+// buildSyncPlan evaluates the conservative peak space required for the sync.
+// It accounts for the existing consolidated archive, the incoming archives, the
+// existing Added archives, a backup copy and the scratch work in the temp
+// directory. All configurable directories are taken into account.
+func buildSyncPlan(env *app.Env, currentArchive string, incomingFiles []string) (*syncPlan, error) {
+	plan := &syncPlan{
+		IncomingCount:  len(incomingFiles),
+		RequiredByDisk: make(map[string]diskRequirement),
+	}
+	for _, p := range incomingFiles {
+		st, err := os.Stat(p)
+		if err != nil {
+			return nil, fmt.Errorf("cannot stat incoming archive %s: %w", p, err)
+		}
+		plan.IncomingSize += st.Size()
+	}
+	if currentArchive != "" {
+		st, err := os.Stat(currentArchive)
+		if err != nil {
+			return nil, fmt.Errorf("cannot stat current archive %s: %w", currentArchive, err)
+		}
+		plan.ExistingArchiveSize = st.Size()
+	}
+	addedFiles, err := filepath.Glob(filepath.Join(env.Archive, "Added-*.zip"))
+	if err != nil {
+		return nil, fmt.Errorf("cannot list added archives: %w", err)
+	}
+	for _, p := range addedFiles {
+		st, err := os.Stat(p)
+		if err != nil {
+			return nil, fmt.Errorf("cannot stat added archive %s: %w", p, err)
+		}
+		plan.ExistingAddedSize += st.Size()
+	}
+
+	const buffer = 100 * 1024 * 1024 // 100 MiB safety margin
+
+	// Archive disk: old consolidated is kept during the operation, existing
+	// Added archives remain, new consolidated and new Added archives appear.
+	archiveReq := plan.ExistingArchiveSize + plan.ExistingAddedSize +
+		plan.ExistingArchiveSize + plan.IncomingSize + plan.IncomingSize + buffer
+	if err := addDiskRequirement(plan, env.Archive, archiveReq); err != nil {
+		return nil, err
+	}
+
+	// Backup disk: copy of the current consolidated archive.
+	if plan.ExistingArchiveSize > 0 {
+		backupReq := plan.ExistingArchiveSize + buffer
+		if err := addDiskRequirement(plan, env.Backup, backupReq); err != nil {
+			return nil, err
+		}
+	}
+
+	// Temp disk: scratch copies of the new consolidated and new Added archives.
+	tempReq := plan.ExistingArchiveSize + plan.IncomingSize + plan.IncomingSize + buffer
+	if err := addDiskRequirement(plan, env.TempDir, tempReq); err != nil {
+		return nil, err
+	}
+
+	plan.HasEnoughSpace = true
+	for _, req := range plan.RequiredByDisk {
+		if req.Required > int64(req.Free) {
+			plan.HasEnoughSpace = false
+		}
+	}
+	return plan, nil
+}
+
+func addDiskRequirement(plan *syncPlan, path string, required int64) error {
+	key, err := diskKey(path)
+	if err != nil {
+		return fmt.Errorf("cannot identify disk for %s: %w", path, err)
+	}
+	req := plan.RequiredByDisk[key]
+	if req.Path == "" {
+		req.Path = path
+		free, err := freeSpace(path)
+		if err != nil {
+			return fmt.Errorf("cannot read free space for %s: %w", path, err)
+		}
+		req.Free = free
+	}
+	req.Required += required
+	plan.RequiredByDisk[key] = req
+	return nil
+}
+
+func printPlan(env *app.Env, plan *syncPlan) {
+	fmt.Println("Sync plan:")
+	fmt.Printf("  Incoming archives: %d, total size: %s\n", plan.IncomingCount, humanSize(plan.IncomingSize))
+	if plan.ExistingArchiveSize > 0 {
+		fmt.Printf("  Existing consolidated archive: %s\n", humanSize(plan.ExistingArchiveSize))
+	} else {
+		fmt.Println("  No existing consolidated archive (initial import)")
+	}
+	if plan.ExistingAddedSize > 0 {
+		fmt.Printf("  Existing added archives: %s\n", humanSize(plan.ExistingAddedSize))
+	}
+	fmt.Println("  Estimated peak space required by disk:")
+	for _, req := range plan.RequiredByDisk {
+		status := "OK"
+		if req.Required > int64(req.Free) {
+			status = "INSUFFICIENT"
+		}
+		fmt.Printf("    %s: required %s, free %s [%s]\n", req.Path, humanSize(req.Required), humanSize(int64(req.Free)), status)
+	}
+	if plan.HasEnoughSpace {
+		fmt.Println("  Status: OK")
+	} else {
+		fmt.Println("  Status: INSUFFICIENT SPACE")
+	}
+}
+
+func confirm(prompt string) (bool, error) {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line == "y" || line == "yes", nil
 }
 
 // recoverArchive validates and, if necessary, repairs the consolidated archive.

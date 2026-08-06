@@ -4,23 +4,35 @@
 
 1. Download your latest Google Takeout export as a ZIP file.
 2. Copy or move it into the `Incoming/` folder inside your TakeOutBack project.
-3. Run the launcher:
-   - Linux: `./TakeOutBack.sh`
-   - Windows: `TakeOutBack.bat`
-4. Watch the live progress: TakeOutBack lists the archives it found, then shows
+3. Run the backup command:
+   - Linux: `./TakeOutBack.sh sync`
+   - Windows: `TakeOutBack.bat sync`
+4. Review the sync plan: TakeOutBack estimates the peak space required on each
+   affected disk and asks for confirmation before writing anything. Add `--yes`
+   to skip the prompt.
+5. Watch the live progress: TakeOutBack lists the archives it found, then shows
    a progress bar for each archive while it is being processed.
-5. Read the final summary printed to the console.
+6. Read the final summary printed to the console.
 
 TakeOutBack writes the following files:
 
 - `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — the current consolidated archive
   (timestamps are in the system's local time).
 - `Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` — only the files added during this run.
+  This file is created only for subsequent imports; the first import produces only
+  the consolidated archive.
 - `Backup/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — a copy of the previous consolidated
   archive, kept before it is replaced. The last 5 backups are retained.
 
-All temporary work is done inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/`. That
-folder is removed at the end of a successful run and any leftover `run-*` folders
+All temporary work is done inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` by
+default. You can override the temp directory and the backup directory from the
+command line:
+
+```bash
+./TakeOutBack.sh sync --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
+```
+
+That folder is removed at the end of a successful run and any leftover `run-*` folders
 from an interrupted run are removed at the start of the next run. As a result,
 `Archive/` only contains final `Consolidated-*.zip`, `Added-*.zip` and the tiny
 `state.json` / `cd.bak` sidecars.
@@ -33,12 +45,11 @@ If you want to import from a different folder than `Incoming/`, use the
 `--incoming` option:
 
 ```bash
-./TakeOutBack.sh --incoming /path/to/other/zips
 ./TakeOutBack.sh sync --incoming /path/to/other/zips
-./TakeOutBack.sh --incoming=/path/to/other/zips
+./TakeOutBack.sh sync --incoming=/path/to/other/zips
 ```
 
-6. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
+7. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
    folder) if you want to free space. TakeOutBack never deletes incoming files
    automatically.
 
@@ -64,6 +75,20 @@ which is still readable.
 
 ## Understanding the Summary
 
+Before writing anything, `sync` shows a plan with the space required on each
+affected disk:
+
+```
+Sync plan:
+  Incoming archives: 4, total size: 4.52 GiB
+  Existing consolidated archive: 12.34 GiB
+  Existing added archives: 0 B
+  Estimated peak space required by disk:
+    /path/to/Archive: required 29.70 GiB, free 45.21 GiB [OK]
+  Status: OK
+Proceed with backup? [y/N]
+```
+
 After each sync you will see something like:
 
 ```
@@ -86,8 +111,8 @@ Added:   /path/to/Archive/Added-20260805-123045.123.zip
 - **Modified files**: entries whose path was already archived but whose CRC or
   size changed. They are stored as a new version (`name__v2.ext`, `name__v3.ext`).
 - **Skipped files**: entries that were already present with identical CRC and size.
-- **Archive / Added**: paths to the new consolidated archive and the archive
-  containing only the files added in this run.
+- **Archive / Added**: paths to the new consolidated archive and, for subsequent
+  imports, the archive containing only the files added in this run.
 
 ## File Versioning
 
@@ -122,7 +147,14 @@ forever.
 ./TakeOutBack.sh sync
 ```
 
-This is the default action when you run `./TakeOutBack.sh` without arguments.
+Running `./TakeOutBack.sh` without arguments now shows the help and does **not**
+start a backup automatically. You must explicitly use the `sync` command.
+
+To run the backup without the confirmation prompt (for scripts or cron jobs):
+
+```bash
+./TakeOutBack.sh sync --yes
+```
 
 ### Verify
 

@@ -15,58 +15,87 @@ import (
 )
 
 func main() {
-	rootFlag := ""
-	incomingFlag := ""
-	var args []string
-	i := 0
-	for i < len(os.Args[1:]) {
-		a := os.Args[1+i]
-		if a == "--root" && i+1 < len(os.Args[1:]) {
-			rootFlag = os.Args[2+i]
+	opts := app.EnvOptions{}
+	var sub []string
+
+	for i := 1; i < len(os.Args); {
+		a := os.Args[i]
+
+		if a == "--root" && i+1 < len(os.Args) {
+			opts.Root = os.Args[i+1]
 			i += 2
 			continue
 		}
 		if strings.HasPrefix(a, "--root=") {
-			rootFlag = strings.TrimPrefix(a, "--root=")
+			opts.Root = strings.TrimPrefix(a, "--root=")
 			i++
 			continue
 		}
-		if a == "--incoming" && i+1 < len(os.Args[1:]) {
-			incomingFlag = os.Args[2+i]
+		if a == "--incoming" && i+1 < len(os.Args) {
+			sub = append(sub, "--incoming", os.Args[i+1])
 			i += 2
 			continue
 		}
 		if strings.HasPrefix(a, "--incoming=") {
-			incomingFlag = strings.TrimPrefix(a, "--incoming=")
+			sub = append(sub, a)
 			i++
 			continue
 		}
-		args = append(args, a)
+		if a == "--temp-dir" && i+1 < len(os.Args) {
+			opts.TempDir = os.Args[i+1]
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(a, "--temp-dir=") {
+			opts.TempDir = strings.TrimPrefix(a, "--temp-dir=")
+			i++
+			continue
+		}
+		if a == "--backup-dir" && i+1 < len(os.Args) {
+			opts.BackupDir = os.Args[i+1]
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(a, "--backup-dir=") {
+			opts.BackupDir = strings.TrimPrefix(a, "--backup-dir=")
+			i++
+			continue
+		}
+		if a == "--yes" {
+			sub = append(sub, "--yes")
+			i++
+			continue
+		}
+		if a == "--help" || a == "-h" || a == "help" || a == "--version" || a == "version" {
+			sub = append(sub, a)
+			i++
+			continue
+		}
+		// First positional argument is the command.
+		if len(sub) == 0 || !strings.HasPrefix(sub[0], "--") {
+			sub = append([]string{a}, sub...)
+		} else {
+			sub = append(sub, a)
+		}
 		i++
 	}
 
-	env, err := app.NewEnv(rootFlag)
+	env, err := app.NewEnv(opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "takeoutback: cannot initialize: %v\n", err)
 		os.Exit(1)
 	}
 	defer env.Close()
 
-	cmd := "sync"
-	var sub []string
-	if len(args) > 0 {
-		cmd = args[0]
-		if len(args) > 1 {
-			sub = args[1:]
-		}
-	}
-	if incomingFlag != "" {
-		sub = append([]string{"--incoming", incomingFlag}, sub...)
+	cmd := ""
+	if len(sub) > 0 && !strings.HasPrefix(sub[0], "--") {
+		cmd = sub[0]
+		sub = sub[1:]
 	}
 
 	var runErr error
 	switch cmd {
-	case "sync", "":
+	case "sync":
 		runErr = engine.Sync(env, sub)
 	case "verify":
 		runErr = engine.Verify(env, sub)
@@ -83,7 +112,10 @@ func main() {
 	case "--help", "help", "-h":
 		printHelp()
 	default:
-		runErr = fmt.Errorf("unknown command %q (try --help)", cmd)
+		printHelp()
+		if cmd != "" {
+			runErr = fmt.Errorf("unknown command %q (try --help)", cmd)
+		}
 	}
 
 	if runErr != nil {
@@ -96,10 +128,10 @@ func main() {
 func printHelp() {
 	fmt.Println(`TakeOutBack - portable Google Takeout consolidator
 
-Usage: TakeOutBack.sh [command] [options]
+Usage: takeoutback [command] [options]
 
 Commands:
-  sync      Consolidate new Takeout ZIPs (default)
+  sync      Plan and run the backup consolidation
   verify    Check archive integrity
   stats     Show archive statistics
   compact   Rewrite archive to remove dead central directory blocks
@@ -108,9 +140,20 @@ Commands:
   --version Print version
   --help    Show this help
 
-Options:
+Global options:
   --root PATH       Use PATH as the project root instead of auto-detecting
-  --incoming PATH   Use PATH as the source folder instead of Incoming/`) 
+  --temp-dir PATH   Use PATH as the temporary work directory
+                    (default: TakeOutBack/temp)
+  --backup-dir PATH Use PATH to store backup copies of the consolidated archive
+                    (default: Backup)
+
+Sync options:
+  --incoming PATH   Use PATH as the source folder instead of Incoming/
+  --yes             Do not ask for confirmation, run the backup immediately
+
+When 'sync' is invoked, TakeOutBack first prints a plan including the space
+required on each affected disk and asks for confirmation. Use --yes to skip
+the prompt.`) 
 }
 
 func menuLoop(env *app.Env) error {

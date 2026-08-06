@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `sync` now prints a disk-space plan before writing anything and asks for
+  confirmation. The plan estimates the peak space required on each affected disk,
+  taking into account the existing consolidated archive, incoming ZIP volume,
+  existing `Added-*.zip` archives, a worst-case new Added archive and the backup
+  copy. Use `--yes` to skip the prompt.
+- New `--temp-dir PATH` option to use a custom temporary work directory.
+- New `--backup-dir PATH` option to store backup copies of the consolidated
+  archive in a custom directory.
+- New `disk_unix.go` and `disk_windows.go` helpers to read free filesystem space.
+
+### Changed
+- The default command is no longer `sync`. Running `takeoutback` without a
+  command now prints the help message.
+- The initial import no longer creates an `Added-*.zip` archive. Added archives are
+  produced only for subsequent imports.
+
+### Fixed
+- N/A
+
 ## [v0.3.9] - 2026-08-05
 
 ### Added
