@@ -88,7 +88,7 @@ func main() {
 	defer env.Close()
 
 	cmd := ""
-	if len(sub) > 0 && !strings.HasPrefix(sub[0], "--") {
+	if len(sub) > 0 {
 		cmd = sub[0]
 		sub = sub[1:]
 	}

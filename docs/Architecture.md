@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.3.9** — the design described here is implemented and
+> Status: **Implemented v0.4.0** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-08-06
+
 ### Added
 - `sync` now prints a disk-space plan before writing anything and asks for
   confirmation. The plan estimates the peak space required on each affected disk,

@@ -92,7 +92,7 @@ Proceed with backup? [y/N]
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.3.9
+TakeOutBack v0.4.0
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523
