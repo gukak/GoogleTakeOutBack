@@ -17,6 +17,7 @@ import (
 func main() {
 	opts := app.EnvOptions{}
 	var sub []string
+	cmd := ""
 
 	for i := 1; i < len(os.Args); {
 		a := os.Args[i]
@@ -61,19 +62,33 @@ func main() {
 			i++
 			continue
 		}
-		if a == "--yes" {
-			sub = append(sub, "--yes")
+		if a == "--archive-dir" && i+1 < len(os.Args) {
+			opts.ArchiveDir = os.Args[i+1]
+			i += 2
+			continue
+		}
+		if strings.HasPrefix(a, "--archive-dir=") {
+			opts.ArchiveDir = strings.TrimPrefix(a, "--archive-dir=")
 			i++
 			continue
 		}
-		if a == "--help" || a == "-h" || a == "help" || a == "--version" || a == "version" {
+		if a == "--yes" || a == "--force" {
 			sub = append(sub, a)
 			i++
 			continue
 		}
+		if a == "--help" || a == "-h" || a == "help" || a == "--version" || a == "version" {
+			if cmd == "" {
+				cmd = a
+			} else {
+				sub = append(sub, a)
+			}
+			i++
+			continue
+		}
 		// First positional argument is the command.
-		if len(sub) == 0 || !strings.HasPrefix(sub[0], "--") {
-			sub = append([]string{a}, sub...)
+		if cmd == "" {
+			cmd = a
 		} else {
 			sub = append(sub, a)
 		}
@@ -86,12 +101,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer env.Close()
-
-	cmd := ""
-	if len(sub) > 0 {
-		cmd = sub[0]
-		sub = sub[1:]
-	}
 
 	var runErr error
 	switch cmd {
@@ -142,6 +151,8 @@ Commands:
 
 Global options:
   --root PATH       Use PATH as the project root instead of auto-detecting
+  --archive-dir PATH Use PATH to store the consolidated archive
+                     (default: Archive)
   --temp-dir PATH   Use PATH as the temporary work directory
                     (default: TakeOutBack/temp)
   --backup-dir PATH Use PATH to store backup copies of the consolidated archive
@@ -150,10 +161,12 @@ Global options:
 Sync options:
   --incoming PATH   Use PATH as the source folder instead of Incoming/
   --yes             Do not ask for confirmation, run the backup immediately
+  --force           Run the backup even if the space estimate reports
+                    insufficient space
 
 When 'sync' is invoked, TakeOutBack first prints a plan including the space
 required on each affected disk and asks for confirmation. Use --yes to skip
-the prompt.`) 
+the prompt, and --force to ignore an insufficient-space warning.`) 
 }
 
 func menuLoop(env *app.Env) error {

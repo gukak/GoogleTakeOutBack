@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.0** — the design described here is implemented and
+> Status: **Implemented v0.4.1** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -409,27 +409,31 @@ on its own, so the file body is **self-describing**.
 1. **Startup**
    - Resolve project root; verify `Incoming/`, `Archive/`, `Backup/`,
      `TakeOutBack/{tools,config,logs,temp}` exist; create missing.
-     Optional `--temp-dir PATH` and `--backup-dir PATH` override the default
-     `TakeOutBack/temp` and `Backup` directories.
-   - Determine the current consolidated archive by scanning `Archive/` for the
-     lexicographically greatest `Consolidated-*.zip` name (timestamp format is
-     sortable; timestamps are in local time).
+     Optional `--archive-dir PATH`, `--temp-dir PATH` and `--backup-dir PATH`
+     override the default `Archive`, `TakeOutBack/temp` and `Backup` directories.
+   - Determine the current consolidated archive by scanning the configured
+     archive directory for the lexicographically greatest `Consolidated-*.zip`
+     name (timestamp format is sortable; timestamps are in local time).
    - Remove any leftover per-execution temp directories from a previously
      interrupted run.
-   - Remove any leftover `*.tmp`, `*.rebuild` or `*.compact` files in `Archive/`.
+   - Remove any leftover `*.tmp`, `*.rebuild` or `*.compact` files in the archive
+     directory.
 
 2. **Plan and confirm**
    - Discover incoming archives (`Incoming/*.zip` by default, or `--incoming`).
-   - Compute a conservative peak-space estimate for each disk affected by
-     `Archive/`, `Backup/` (or the custom backup directory) and the temp
-     directory. The estimate accounts for:
+   - Compute a peak-space estimate for each disk affected by the archive, backup
+     and temp directories. The incoming ZIP files are only read, so the incoming
+     disk is not counted. The estimate accounts for which directories share a
+     filesystem and for:
      - the existing consolidated archive (kept during the operation),
      - the total volume of the incoming ZIP files,
      - existing `Added-*.zip` archives,
-     - a worst-case new `Added-*.zip`,
+     - a worst-case new `Added-*.zip` for subsequent imports,
      - a backup copy of the current consolidated archive.
    - Print the plan and ask for confirmation. If `--yes` was passed, skip the
-     prompt. Abort if the user declines or if free space is insufficient.
+     prompt. If `--force` was passed, continue even when the estimate reports
+     insufficient space. Otherwise, abort if the user declines or if free space
+     is insufficient.
 
 3. **Acquire lock and backup**
    - Acquire a cross-run lockfile `Archive/.consolidated.lock`. If it exists and
@@ -959,7 +963,7 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
-- **v0.4.0** — `verify`, `stats`, interactive menu.
+- **v0.4.1** — `verify`, `stats`, interactive menu.
 - **v0.5.0** — `update` self-updater + checksum verification + release automated
   via Actions (if maintainer enables).
 - **v0.6.0** — `--compact`.

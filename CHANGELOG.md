@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.1] - 2026-08-06
+
+### Added
+- New `--archive-dir PATH` option to use a custom archive directory.
+- New `--force` flag to run `sync` even when the disk-space estimate reports
+  insufficient space.
+- The sync plan now displays the configured incoming, archive, backup and temp
+  directories so the user can verify which paths are used.
+
+### Changed
+- Disk-space estimation is now computed per filesystem and accounts for the fact
+  that temporary files are renamed into place (not copied), and that incoming ZIP
+  files are only read, not written. This removes the previous 4x over-estimation.
+
+### Fixed
+- `sync` options such as `--force` and `--yes` are now accepted before or after
+  the `sync` command.
+
 ## [v0.4.0] - 2026-08-06
 
 ### Added

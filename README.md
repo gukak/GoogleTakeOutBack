@@ -36,7 +36,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.0/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.1/install.sh | bash
 ```
 
 ### Install on Windows
@@ -44,7 +44,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.0/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.0/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.1/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -69,17 +69,24 @@ consolidated archive. Every later sync also produces a companion
 copies the previous consolidated archive to `Backup/` before replacing it.
 
 All temporary work happens inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` by
-default. You can override the temp directory and the backup directory from the
+default. You can override the archive, temp and backup directories from the
 command line:
 
 ```bash
-./TakeOutBack.sh sync --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
+./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
 ```
 
 You can also sync from a different source folder:
 
 ```bash
 ./TakeOutBack.sh sync --incoming /path/to/other/zips
+```
+
+If the disk-space estimate reports insufficient space but you still want to run
+the backup, add `--force`:
+
+```bash
+./TakeOutBack.sh sync --force
 ```
 
 ### Live progress
@@ -111,7 +118,7 @@ When the run finishes, the usual summary is printed, including the paths to the
 new consolidated archive and, for subsequent imports, the added-only archive:
 
 ```
-TakeOutBack v0.4.0
+TakeOutBack v0.4.1
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142
@@ -130,6 +137,7 @@ Added:   /path/to/Archive/Added-20260805-123045.123.zip
 | --- | --- |
 | `sync` | Plan and run the backup consolidation (requires confirmation) |
 | `sync --yes` | Run the backup without confirmation |
+| `sync --force` | Run the backup even if the space estimate is insufficient |
 | `verify` | Check archive integrity |
 | `verify --deep` | Re-decompress every entry and verify CRC32 |
 | `stats` | Show archive statistics |

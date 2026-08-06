@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the current takeoutback version. It is overridden at build time.
-const Version = "v0.4.0"
+const Version = "v0.4.1"
 
 // OwnerRepo is the GitHub owner/repository used by the installer and updater.
 // Change this to the real repository before the first release.
@@ -89,6 +89,7 @@ func DefaultPolicy() Policy {
 // EnvOptions configures the runtime environment.
 type EnvOptions struct {
 	Root      string
+	ArchiveDir string
 	TempDir   string
 	BackupDir string
 }
@@ -125,7 +126,13 @@ func NewEnv(opts EnvOptions) (*Env, error) {
 
 	e := &Env{Root: root}
 	e.Incoming = filepath.Join(root, IncomingDir)
-	e.Archive = filepath.Join(root, ArchiveDir)
+	if opts.ArchiveDir != "" {
+		if e.Archive, err = filepath.Abs(opts.ArchiveDir); err != nil {
+			return nil, fmt.Errorf("cannot resolve archive directory %q: %w", opts.ArchiveDir, err)
+		}
+	} else {
+		e.Archive = filepath.Join(root, ArchiveDir)
+	}
 	if opts.BackupDir != "" {
 		if e.Backup, err = filepath.Abs(opts.BackupDir); err != nil {
 			return nil, fmt.Errorf("cannot resolve backup directory %q: %w", opts.BackupDir, err)
@@ -150,7 +157,7 @@ func NewEnv(opts EnvOptions) (*Env, error) {
 	}
 	e.logStart = time.Now()
 
-	if err := ensureLayout(root, e.Backup, e.TempDir); err != nil {
+	if err := ensureLayout(root, e.Archive, e.Backup, e.TempDir); err != nil {
 		return nil, err
 	}
 	if err := e.loadSettings(); err != nil {
@@ -253,10 +260,10 @@ func hasRootMarkers(d string) bool {
 	return true
 }
 
-func ensureLayout(root, backupDir, tempDir string) error {
+func ensureLayout(root, archiveDir, backupDir, tempDir string) error {
 	dirs := []string{
 		filepath.Join(root, IncomingDir),
-		filepath.Join(root, ArchiveDir),
+		archiveDir,
 		backupDir,
 		filepath.Join(root, AppDir),
 		filepath.Join(root, AppDir, ToolsDir, "linux"),

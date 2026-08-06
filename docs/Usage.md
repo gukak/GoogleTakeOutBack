@@ -25,17 +25,17 @@ TakeOutBack writes the following files:
   archive, kept before it is replaced. The last 5 backups are retained.
 
 All temporary work is done inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` by
-default. You can override the temp directory and the backup directory from the
+default. You can override the archive, temp and backup directories from the
 command line:
 
 ```bash
-./TakeOutBack.sh sync --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
+./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
 ```
 
 That folder is removed at the end of a successful run and any leftover `run-*` folders
 from an interrupted run are removed at the start of the next run. As a result,
-`Archive/` only contains final `Consolidated-*.zip`, `Added-*.zip` and the tiny
-`state.json` / `cd.bak` sidecars.
+the configured archive directory only contains final `Consolidated-*.zip`,
+`Added-*.zip` and the tiny `state.json` / `cd.bak` sidecars.
 
 If a sync is interrupted (Ctrl+C, power loss, drive removal), the next run will
 automatically detect the stale lock and resume. Your previous consolidated archive
@@ -92,7 +92,7 @@ Proceed with backup? [y/N]
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.4.0
+TakeOutBack v0.4.1
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523
@@ -155,6 +155,14 @@ To run the backup without the confirmation prompt (for scripts or cron jobs):
 ```bash
 ./TakeOutBack.sh sync --yes
 ```
+
+To run the backup even when the disk-space estimate reports insufficient space:
+
+```bash
+./TakeOutBack.sh sync --force
+```
+
+`--force` also implies `--yes` (no confirmation prompt).
 
 ### Verify
 

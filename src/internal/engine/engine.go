@@ -40,6 +40,7 @@ func Sync(env *app.Env, args []string) error {
 
 	incomingDir := env.Incoming
 	yesFlag := false
+	forceFlag := false
 	i := 0
 	for i < len(args) {
 		if args[i] == "--incoming" && i+1 < len(args) {
@@ -54,6 +55,11 @@ func Sync(env *app.Env, args []string) error {
 		}
 		if args[i] == "--yes" {
 			yesFlag = true
+			i++
+			continue
+		}
+		if args[i] == "--force" {
+			forceFlag = true
 			i++
 			continue
 		}
@@ -84,13 +90,18 @@ func Sync(env *app.Env, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot evaluate disk space: %w", err)
 	}
-	printPlan(env, plan)
+	printPlan(env, plan, incomingDir)
 
 	if !plan.HasEnoughSpace {
-		return fmt.Errorf("not enough free space; backup cancelled")
+		if forceFlag {
+			env.Logf("warn", "disk space estimate reports insufficient space; continuing because --force was given")
+			fmt.Println("Warning: disk space estimate reports insufficient space. Continuing because --force was given.")
+		} else {
+			return fmt.Errorf("not enough free space; backup cancelled")
+		}
 	}
 
-	if !yesFlag {
+	if !yesFlag && !forceFlag {
 		ok, err := confirm("Proceed with backup? [y/N] ")
 		if err != nil {
 			return fmt.Errorf("cannot read confirmation: %w", err)
@@ -655,10 +666,23 @@ type diskRequirement struct {
 	Required int64
 }
 
-// buildSyncPlan evaluates the conservative peak space required for the sync.
-// It accounts for the existing consolidated archive, the incoming archives, the
-// existing Added archives, a backup copy and the scratch work in the temp
-// directory. All configurable directories are taken into account.
+// sameDisk reports whether two paths are on the same filesystem.
+func sameDisk(a, b string) bool {
+	ka, err := diskKey(a)
+	if err != nil {
+		return false
+	}
+	kb, err := diskKey(b)
+	if err != nil {
+		return false
+	}
+	return ka == kb
+}
+
+// buildSyncPlan evaluates the peak space required for the sync per disk.
+// The incoming ZIP files are only read, so the incoming disk is not counted.
+// The estimate takes into account which directories (Archive, Backup, Temp)
+// share the same filesystem.
 func buildSyncPlan(env *app.Env, currentArchive string, incomingFiles []string) (*syncPlan, error) {
 	plan := &syncPlan{
 		IncomingCount:  len(incomingFiles),
@@ -692,26 +716,53 @@ func buildSyncPlan(env *app.Env, currentArchive string, incomingFiles []string) 
 
 	const buffer = 100 * 1024 * 1024 // 100 MiB safety margin
 
-	// Archive disk: old consolidated is kept during the operation, existing
-	// Added archives remain, new consolidated and new Added archives appear.
-	archiveReq := plan.ExistingArchiveSize + plan.ExistingAddedSize +
-		plan.ExistingArchiveSize + plan.IncomingSize + plan.IncomingSize + buffer
-	if err := addDiskRequirement(plan, env.Archive, archiveReq); err != nil {
+	isInitial := plan.ExistingArchiveSize == 0
+	newAddedSize := int64(0)
+	if !isInitial {
+		newAddedSize = plan.IncomingSize
+	}
+	newConsolidatedSize := plan.ExistingArchiveSize + plan.IncomingSize
+	// Temp file: the new consolidated archive plus a possible Added archive.
+	tempSize := newConsolidatedSize + newAddedSize
+	// Final files in Archive: the new consolidated archive plus existing Added
+	// archives plus a possible new Added archive.
+	finalSize := newConsolidatedSize + plan.ExistingAddedSize + newAddedSize
+	// Base: what already exists in Archive before the operation starts.
+	baseSize := plan.ExistingArchiveSize + plan.ExistingAddedSize
+
+	// Archive disk peak. If Temp is on the same filesystem, the temporary file is
+	// created there (and then renamed). The peak is the existing Archive content
+	// plus the temporary file. If Temp is elsewhere, the peak is the existing
+	// content plus the final files.
+	archiveNeed := baseSize
+	if sameDisk(env.TempDir, env.Archive) {
+		archiveNeed += tempSize
+	} else {
+		archiveNeed += finalSize
+	}
+	// If Backup is also on the Archive filesystem, account for the backup copy.
+	if plan.ExistingArchiveSize > 0 && sameDisk(env.Backup, env.Archive) {
+		archiveNeed += plan.ExistingArchiveSize
+	}
+	if err := addDiskRequirement(plan, env.Archive, archiveNeed, buffer); err != nil {
 		return nil, err
 	}
 
-	// Backup disk: copy of the current consolidated archive.
-	if plan.ExistingArchiveSize > 0 {
-		backupReq := plan.ExistingArchiveSize + buffer
-		if err := addDiskRequirement(plan, env.Backup, backupReq); err != nil {
+	// Backup disk: copy of the current consolidated archive (unless already counted
+	// because it shares the Archive filesystem).
+	if plan.ExistingArchiveSize > 0 && !sameDisk(env.Backup, env.Archive) {
+		backupNeed := plan.ExistingArchiveSize
+		if err := addDiskRequirement(plan, env.Backup, backupNeed, buffer); err != nil {
 			return nil, err
 		}
 	}
 
-	// Temp disk: scratch copies of the new consolidated and new Added archives.
-	tempReq := plan.ExistingArchiveSize + plan.IncomingSize + plan.IncomingSize + buffer
-	if err := addDiskRequirement(plan, env.TempDir, tempReq); err != nil {
-		return nil, err
+	// Temp disk: the temporary files, unless Temp is on the Archive filesystem.
+	if !sameDisk(env.TempDir, env.Archive) {
+		tempNeed := tempSize
+		if err := addDiskRequirement(plan, env.TempDir, tempNeed, buffer); err != nil {
+			return nil, err
+		}
 	}
 
 	plan.HasEnoughSpace = true
@@ -723,7 +774,7 @@ func buildSyncPlan(env *app.Env, currentArchive string, incomingFiles []string) 
 	return plan, nil
 }
 
-func addDiskRequirement(plan *syncPlan, path string, required int64) error {
+func addDiskRequirement(plan *syncPlan, path string, required int64, buffer int64) error {
 	key, err := diskKey(path)
 	if err != nil {
 		return fmt.Errorf("cannot identify disk for %s: %w", path, err)
@@ -736,15 +787,20 @@ func addDiskRequirement(plan *syncPlan, path string, required int64) error {
 			return fmt.Errorf("cannot read free space for %s: %w", path, err)
 		}
 		req.Free = free
+		req.Required += buffer
 	}
 	req.Required += required
 	plan.RequiredByDisk[key] = req
 	return nil
 }
 
-func printPlan(env *app.Env, plan *syncPlan) {
+func printPlan(env *app.Env, plan *syncPlan, incomingDir string) {
 	fmt.Println("Sync plan:")
+	fmt.Printf("  Incoming directory: %s\n", incomingDir)
 	fmt.Printf("  Incoming archives: %d, total size: %s\n", plan.IncomingCount, humanSize(plan.IncomingSize))
+	fmt.Printf("  Archive directory:  %s\n", env.Archive)
+	fmt.Printf("  Backup directory:   %s\n", env.Backup)
+	fmt.Printf("  Temp directory:     %s\n", env.TempDir)
 	if plan.ExistingArchiveSize > 0 {
 		fmt.Printf("  Existing consolidated archive: %s\n", humanSize(plan.ExistingArchiveSize))
 	} else {
