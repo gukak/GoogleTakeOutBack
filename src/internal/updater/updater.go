@@ -23,7 +23,12 @@ import (
 // Update checks GitHub Releases for a newer version and installs it.
 // If --version vX.Y.Z is provided, that exact version is installed instead.
 func Update(env *app.Env, args []string) error {
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	var target string
 	for i := 0; i < len(args); i++ {
@@ -34,6 +39,10 @@ func Update(env *app.Env, args []string) error {
 		}
 		if strings.HasPrefix(args[i], "--version=") {
 			target = strings.TrimPrefix(args[i], "--version=")
+			continue
+		}
+		if target == "" && looksLikeVersion(args[i]) {
+			target = args[i]
 		}
 	}
 
@@ -186,6 +195,25 @@ func fileSHA256(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func looksLikeVersion(s string) bool {
+	s = strings.TrimPrefix(s, "v")
+	parts := strings.Split(s, ".")
+	if len(parts) < 2 || len(parts) > 4 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // compareVersion compares two semantic version strings starting with 'v'.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.6] - 2026-08-07
+
+### Fixed
+- `update` now correctly follows GitHub's redirect to the latest release page by
+  disabling automatic redirect handling and reading the `Location` header.
+- `update` now accepts a bare version argument (e.g. `update v0.4.6`) in
+  addition to `--version v0.4.6`.
+
 ## [v0.4.5] - 2026-08-07
 
 ### Added
