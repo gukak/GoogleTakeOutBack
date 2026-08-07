@@ -110,8 +110,12 @@ func main() {
 		runErr = engine.Compact(env, sub)
 	case "update":
 		runErr = updater.Update(env, sub)
+	case "clean":
+		runErr = engine.Clean(env, sub)
 	case "menu":
-		runErr = menuLoop(env)
+		root := env.Root
+		env.Close()
+		runErr = menuLoop(root)
 	case "--version", "version":
 		env.PrintVersion()
 	case "--help", "help", "-h":
@@ -131,16 +135,17 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println(`TakeOutBack - portable Google Takeout consolidator
+	fmt.Printf(`TakeOutBack %s - portable Google Takeout consolidator
 
 Usage: takeoutback [command] [options]
 
 Commands:
-  sync      Plan and run the backup consolidation
+  sync      Run the backup consolidation
   verify    Check archive integrity
   stats     Show archive statistics
   compact   Rewrite archive to remove dead central directory blocks
   update    Update the binary from GitHub Releases
+  clean     Reset TakeOutBack to a fresh-install state
   menu      Interactive menu
   --version Print version
   --help    Show this help
@@ -158,11 +163,13 @@ Sync options:
   --incoming PATH   Use PATH as the source folder instead of Incoming/
 
 When 'sync' is invoked, TakeOutBack lists the incoming archives and starts the
-backup immediately.`) 
+backup immediately.`, app.Version)
+	fmt.Println()
 }
 
-func menuLoop(env *app.Env) error {
+func menuLoop(defaultRoot string) error {
 	reader := bufio.NewReader(os.Stdin)
+	fmt.Printf("\nTakeOutBack %s\n", app.Version)
 	for {
 		fmt.Println(`
 TakeOutBack Menu
@@ -170,7 +177,8 @@ TakeOutBack Menu
 2. Verify archive
 3. View statistics
 4. Update tools
-5. Exit`)
+5. Clean / reset
+6. Exit`)
 		fmt.Print("Choice: ")
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -178,25 +186,108 @@ TakeOutBack Menu
 		}
 		switch strings.TrimSpace(line) {
 		case "1":
-			if err := engine.Sync(env, nil); err != nil {
+			opts, syncArgs := promptSyncOptions(reader, defaultRoot)
+			env, err := app.NewEnv(opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				break
+			}
+			if err := engine.Sync(env, syncArgs); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
+			env.Close()
 		case "2":
+			opts := promptBaseOptions(reader, defaultRoot)
+			env, err := app.NewEnv(opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				break
+			}
 			if err := engine.Verify(env, nil); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
+			env.Close()
 		case "3":
+			opts := promptBaseOptions(reader, defaultRoot)
+			env, err := app.NewEnv(opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				break
+			}
 			if err := engine.Stats(env, nil); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
+			env.Close()
 		case "4":
-			if err := updater.Update(env, nil); err != nil {
+			ver := promptUpdateVersion(reader)
+			env, err := app.NewEnv(app.EnvOptions{Root: defaultRoot})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				break
+			}
+			args := []string(nil)
+			if ver != "" {
+				args = []string{"--version", ver}
+			}
+			if err := updater.Update(env, args); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
+			env.Close()
 		case "5":
+			opts := promptBaseOptions(reader, defaultRoot)
+			env, err := app.NewEnv(opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				break
+			}
+			if err := engine.Clean(env, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			}
+			env.Close()
+		case "6":
 			return nil
 		default:
 			fmt.Println("Invalid choice")
 		}
 	}
+}
+
+func promptBaseOptions(reader *bufio.Reader, defaultRoot string) app.EnvOptions {
+	opts := app.EnvOptions{Root: defaultRoot}
+	opts.ArchiveDir = promptPath(reader, "Archive directory", "Archive")
+	opts.TempDir = promptPath(reader, "Temp directory", "TakeOutBack/temp")
+	opts.BackupDir = promptPath(reader, "Backup directory", "Backup")
+	return opts
+}
+
+func promptSyncOptions(reader *bufio.Reader, defaultRoot string) (app.EnvOptions, []string) {
+	opts := promptBaseOptions(reader, defaultRoot)
+	incoming := promptPath(reader, "Incoming directory", "Incoming")
+	var args []string
+	if incoming != "" {
+		args = []string{"--incoming", incoming}
+	}
+	return opts, args
+}
+
+func promptUpdateVersion(reader *bufio.Reader) string {
+	fmt.Print("Version to install (empty for latest): ")
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(line)
+}
+
+func promptPath(reader *bufio.Reader, label, def string) string {
+	fmt.Printf("%s [%s]: ", label, def)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return def
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return def
+	}
+	return line
 }

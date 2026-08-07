@@ -21,8 +21,32 @@ import (
 )
 
 // Update checks GitHub Releases for a newer version and installs it.
+// If --version vX.Y.Z is provided, that exact version is installed instead.
 func Update(env *app.Env, args []string) error {
 	client := &http.Client{Timeout: 60 * time.Second}
+
+	var target string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--version" && i+1 < len(args) {
+			target = args[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(args[i], "--version=") {
+			target = strings.TrimPrefix(args[i], "--version=")
+		}
+	}
+
+	if target != "" {
+		if !strings.HasPrefix(target, "v") {
+			target = "v" + target
+		}
+		if target == app.Version {
+			env.Summary("Already on %s", app.Version)
+			return nil
+		}
+		return installVersion(env, client, target)
+	}
 
 	// Resolve the latest tag.
 	latestURL := fmt.Sprintf("https://github.com/%s/releases/latest", app.OwnerRepo)
@@ -55,12 +79,18 @@ func Update(env *app.Env, args []string) error {
 		env.Summary("Already up to date (%s)", app.Version)
 		return nil
 	}
+	return installVersion(env, client, latest)
+}
 
+func installVersion(env *app.Env, client *http.Client, version string) error {
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
 	binName := app.BinaryName()
-	assetURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", app.OwnerRepo, latest, binName)
+	assetURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", app.OwnerRepo, version, binName)
 	sumURL := assetURL + ".sha256"
 
-	env.Summary("Downloading %s...", latest)
+	env.Summary("Downloading %s...", version)
 	binPath := filepath.Join(filepath.Dir(env.BinaryPath()), ".tmp", binName)
 	if err := os.MkdirAll(filepath.Dir(binPath), 0755); err != nil {
 		return err
@@ -102,7 +132,7 @@ func Update(env *app.Env, args []string) error {
 	if err := os.Rename(binPath, target); err != nil {
 		return err
 	}
-	env.Summary("Updated to %s", latest)
+	env.Summary("Updated to %s", version)
 	return nil
 }
 

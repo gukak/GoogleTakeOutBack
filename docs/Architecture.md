@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.3** — the design described here is implemented and
+> Status: **Implemented v0.4.4** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -944,7 +944,8 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
-- **v0.4.3** — `verify`, `stats`, interactive menu.
+- **v0.4.4** — interactive menu with custom paths, pre-sync integrity check, backup cleanup prompt, `clean` command, targeted `update --version`, version banner and skipped-files count fix.
+- **v0.4.3** — progress bars for backup and existing-entry copy, earlier archive list.
 - **v0.5.0** — `update` self-updater + checksum verification + release automated
   via Actions (if maintainer enables).
 - **v0.6.0** — `--compact`.

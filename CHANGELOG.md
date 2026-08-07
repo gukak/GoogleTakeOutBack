@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.4] - 2026-08-07
+
+### Added
+- `takeoutback` now prints its version in the help banner and at the top of the
+  interactive menu.
+- Interactive menu (`menu` command) now lets the user enter custom paths for the
+  incoming, archive, temp and backup directories. The default path is shown in
+  brackets and kept when the user presses Enter.
+- `sync` now performs a lightweight integrity check on the existing consolidated
+  archive before modifying it. If the archive is detected as corrupt, the user
+  is asked for confirmation before continuing.
+- `sync` now asks whether to delete previous backup files in the configured
+  backup directory to free space, but only when previous backups actually exist.
+- New `clean` command resets TakeOutBack to a fresh-install state by removing
+  all files from the incoming, archive, backup and temp directories (settings
+  and logs are preserved). A confirmation prompt is shown first.
+- `update` now accepts `--version vX.Y.Z` to install a specific release. When no
+  version is specified, the latest published release is installed as before.
+
+### Fixed
+- Files skipped by policy (for example metadata sidecars) are now counted in the
+  "Skipped files" report line, so `Files scanned` equals `New + Modified + Skipped`.
+
 ## [v0.4.3] - 2026-08-06
 
 ### Added

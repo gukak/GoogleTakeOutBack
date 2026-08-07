@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"bufio"
 	"compress/flate"
 	"fmt"
 	"hash/crc32"
@@ -63,6 +64,15 @@ func Sync(env *app.Env, args []string) error {
 	currentArchive, err := env.CurrentArchive()
 	if err != nil {
 		return fmt.Errorf("cannot locate current archive: %w", err)
+	}
+
+	if currentArchive != "" {
+		if err := checkArchiveIntegrity(currentArchive); err != nil {
+			fmt.Printf("Warning: current archive integrity check failed: %v\n", err)
+			if !confirm("Continue anyway? (y/N): ") {
+				return fmt.Errorf("sync aborted by user")
+			}
+		}
 	}
 
 	incomingFiles, err := discoverIncoming(incomingDir)
@@ -183,6 +193,7 @@ func Sync(env *app.Env, args []string) error {
 			bar.update(i)
 			report.FilesScanned++
 			if shouldSkip(env, e) {
+				report.SkippedFiles++
 				continue
 			}
 			key := app.NormalizeKey(e.Name)
@@ -423,9 +434,36 @@ func backupArchive(env *app.Env, src string) error {
 		}
 		return err
 	}
+	if files, _ := listBackups(env.Backup); len(files) > 0 {
+		fmt.Printf("Found %d previous backup(s) in %s.\n", len(files), env.Backup)
+		if confirm("Delete previous backups to free space? (y/N): ") {
+			for _, f := range files {
+				_ = os.Remove(filepath.Join(env.Backup, f))
+			}
+		}
+	}
 	dst := uniqueArchivePath(env.Backup, filepath.Base(src))
 	fmt.Println("Backing up current consolidated archive...")
 	return copyFileWithProgress(src, dst)
+}
+
+func listBackups(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, "Consolidated-") && strings.HasSuffix(name, ".zip") {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 func copyFile(src, dst string) error {
@@ -591,6 +629,38 @@ func releaseLock(f *os.File) {
 	_ = os.Remove(f.Name())
 }
 
+func confirm(prompt string) bool {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	line = strings.ToLower(strings.TrimSpace(line))
+	return line == "y" || line == "yes"
+}
+
+func checkArchiveIntegrity(path string) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if st.Size() == 0 {
+		return nil
+	}
+	fr, err := zipx.OpenFileRead(path)
+	if err != nil {
+		return err
+	}
+	defer fr.Close()
+	for _, e := range fr.Entries {
+		if err := verifyEntry(fr.File, e, false); err != nil {
+			return fmt.Errorf("entry %s: %w", e.Name, err)
+		}
+	}
+	return nil
+}
+
 func printReport(env *app.Env, r *Report, start time.Time) {
 	d := time.Since(start)
 	env.Summary("TakeOutBack %s", app.Version)
@@ -717,6 +787,44 @@ func recoverArchive(env *app.Env, archivePath, tempDir string) error {
 	}
 	if err := os.Rename(rebuildTmp, archivePath); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Clean removes all user data (Incoming, Archive, Backup and temp files) and
+// resets TakeOutBack to a fresh-install state. Settings and logs are preserved.
+func Clean(env *app.Env, args []string) error {
+	fmt.Println("Clean will remove all files from:")
+	fmt.Printf("  Incoming: %s\n", env.Incoming)
+	fmt.Printf("  Archive:  %s\n", env.Archive)
+	fmt.Printf("  Backup:   %s\n", env.Backup)
+	fmt.Printf("  Temp:     %s\n", env.TempDir)
+	if !confirm("Are you sure? (y/N): ") {
+		return nil
+	}
+	dirs := []string{env.Incoming, env.Archive, env.Backup, env.TempDir}
+	for _, d := range dirs {
+		if err := removeDirContents(d); err != nil {
+			return err
+		}
+	}
+	env.Summary("TakeOutBack reset to fresh-install state")
+	return nil
+}
+
+func removeDirContents(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		p := filepath.Join(dir, e.Name())
+		if err := os.RemoveAll(p); err != nil {
+			return err
+		}
 	}
 	return nil
 }

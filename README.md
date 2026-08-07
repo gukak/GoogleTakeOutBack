@@ -32,7 +32,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.3/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.4/install.sh | bash
 ```
 
 ### Install on Windows
@@ -40,7 +40,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.3/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.3/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.4/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -94,7 +94,7 @@ When the run finishes, the usual summary is printed, including the paths to the
 new consolidated archive and, for subsequent imports, the added-only archive:
 
 ```
-TakeOutBack v0.4.3
+TakeOutBack v0.4.4
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142
@@ -117,7 +117,10 @@ Added:   /path/to/Archive/Added-20260805-123045.123.zip
 | `stats` | Show archive statistics |
 | `compact` | Rewrite archive to remove dead central-directory blocks |
 | `update` | Update the binary from GitHub Releases |
+| `update --version vX.Y.Z` | Install a specific release |
+| `clean` | Reset incoming, archive, backup and temp files (asks confirmation) |
 | `menu` | Interactive menu |
+| `--version` | Print the current version |
 | `--help` | Show available commands and options |
 
 ## How It Works

@@ -77,7 +77,7 @@ which is still readable.
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.4.3
+TakeOutBack v0.4.4
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523
@@ -172,8 +172,24 @@ needed when the archive becomes noticeably larger than its payload content.
 ./TakeOutBack.sh update
 ```
 
-Checks GitHub Releases for a newer version and downloads it. Your archives and
-configuration are never touched.
+Checks GitHub Releases for a newer version and downloads it. Your archives,
+backups and incoming files are never touched.
+
+To install a specific release instead of the latest one:
+
+```bash
+./TakeOutBack.sh update --version v0.4.4
+```
+
+### Clean / Reset
+
+```bash
+./TakeOutBack.sh clean
+```
+
+Removes all files from the incoming, archive, backup and temp directories after
+asking for confirmation. This resets TakeOutBack to a fresh-install state while
+preserving settings and logs.
 
 ### Interactive Menu
 
@@ -181,7 +197,9 @@ configuration are never touched.
 ./TakeOutBack.sh menu
 ```
 
-Shows a numbered menu for users who prefer not to type commands.
+Shows a numbered menu for users who prefer not to type commands. The menu lets
+you enter custom paths for the incoming, archive, temp and backup directories;
+the default path is shown in brackets and kept if you press Enter.
 
 ## Logs
 

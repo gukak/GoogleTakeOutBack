@@ -99,7 +99,7 @@ backslash escaped the closing quote. It is fixed in v0.3.6 and later. Reinstall
 with the latest installer:
 
 ```powershell
-irm https://github.com/OWNER/REPO/releases/download/v0.4.3/install.ps1 | iex
+irm https://github.com/OWNER/REPO/releases/download/v0.4.4/install.ps1 | iex
 ```
 
 ### Stale lock after a crash or Ctrl+C
