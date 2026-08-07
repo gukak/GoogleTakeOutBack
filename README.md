@@ -32,7 +32,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.4/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.5/install.sh | bash
 ```
 
 ### Install on Windows
@@ -40,7 +40,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.4/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.4/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.5/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -59,17 +59,22 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.4/install.
 4. Repeat whenever you have a new Takeout export.
 
 Your consolidated archive lives at `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`
-(the local timestamp is updated on every sync). The first import creates only the
-consolidated archive. Every later sync also produces a companion
+(the local timestamp is updated on every sync, even when nothing changes). The
+first import creates only the consolidated archive. Every later sync that
+contains new or modified files also produces a companion
 `Added-YYYYMMDD-HHMMSS.mmm.zip` with only the files imported during that run, and
 copies the previous consolidated archive to `Backup/` before replacing it.
 
-All temporary work happens inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` by
-default. You can override the archive, temp and backup directories from the
-command line:
+You can override the archive and backup directories from the command line:
 
 ```bash
-./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
+./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --backup-dir /path/to/backup/disk
+```
+
+To skip the backup copy (for example when disk space is very tight):
+
+```bash
+./TakeOutBack.sh sync --no-backup
 ```
 
 You can also sync from a different source folder:
@@ -94,12 +99,13 @@ When the run finishes, the usual summary is printed, including the paths to the
 new consolidated archive and, for subsequent imports, the added-only archive:
 
 ```
-TakeOutBack v0.4.4
+TakeOutBack v0.4.5
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142
 Modified files   : 8
 Skipped files    : 3215
+Errors           : 0
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
@@ -107,18 +113,22 @@ Archive: /path/to/Archive/Consolidated-20260805-123045.123.zip
 Added:   /path/to/Archive/Added-20260805-123045.123.zip
 ```
 
+TakeOutBack also writes a summary text file next to the consolidated archive,
+for example `Archive/Consolidated-20260805-123045.123.txt`.
+
 ## Commands
 
 | Command | Description |
 | --- | --- |
 | `sync` | Consolidate new and changed files from `Incoming/` |
+| `sync --no-backup` | Same, without copying the current archive to `Backup/` |
 | `verify` | Check archive integrity |
 | `verify --deep` | Re-decompress every entry and verify CRC32 |
 | `stats` | Show archive statistics |
 | `compact` | Rewrite archive to remove dead central-directory blocks |
 | `update` | Update the binary from GitHub Releases |
 | `update --version vX.Y.Z` | Install a specific release |
-| `clean` | Reset incoming, archive, backup and temp files (asks confirmation) |
+| `clean` | Reset incoming, archive and backup files (asks confirmation) |
 | `menu` | Interactive menu |
 | `--version` | Print the current version |
 | `--help` | Show available commands and options |

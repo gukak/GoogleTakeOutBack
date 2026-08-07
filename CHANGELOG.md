@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.5] - 2026-08-07
+
+### Added
+- The application version is now printed as the very first line on every launch,
+  with or without arguments (`--version` still exits immediately after printing
+  the version).
+- `sync` now creates a human-readable summary text file in `Archive/` next to the
+  consolidated archive, with the same base name and a `.txt` extension.
+- `sync` now reports the number of files that could not be appended in an
+  `Errors` counter.
+- Menu and CLI `sync` now support `--no-backup` to skip copying the current
+  consolidated archive to `Backup/` before the sync.
+
+### Changed
+- `sync` no longer builds the new consolidated archive in a temporary directory.
+  It now writes directly into `Archive/`, because the backup copy already protects
+  the previous archive. This saves disk space and avoids a full copy step.
+- The consolidated archive is now renamed (timestamped) even when every incoming
+  file is skipped, so `Archive/` always reflects the latest sync run.
+- The `TakeOutBack/temp/` directory is no longer created or used. Any recovery or
+  compact work uses short-lived system temp directories instead.
+- The interactive menu no longer asks for a temp directory.
+
+### Fixed
+- Files that fail to append are now counted in the summary (`Errors`), making the
+  relationship `Files scanned = New + Modified + Skipped + Errors` explicit.
+
 ## [v0.4.4] - 2026-08-07
 
 ### Added

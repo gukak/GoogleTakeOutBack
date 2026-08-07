@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.4** — the design described here is implemented and
+> Status: **Implemented v0.4.5** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -99,11 +99,11 @@ are ever required on the host.**
 
 **Decision**: The complete historical collection lives in a single *current*
 ZIP file named `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`. On every sync a
-brand-new consolidated archive is written from scratch into a temporary file;
-once complete it is renamed into place and the previous consolidated archive is
-removed from `Archive/` (a copy already lives in `Backup/`). A companion
+brand-new consolidated archive is written directly into `Archive/` with a fresh
+timestamped name; once complete, the previous consolidated archive is removed
+from `Archive/` (a copy already lives in `Backup/`). A companion
 `Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` contains only the entries imported during
-that sync.
+that sync. A same-named `.txt` file records the run summary.
 
 Why this model (vs alternatives in §4):
 
@@ -408,14 +408,12 @@ on its own, so the file body is **self-describing**.
 
 1. **Startup**
    - Resolve project root; verify `Incoming/`, `Archive/`, `Backup/`,
-     `TakeOutBack/{tools,config,logs,temp}` exist; create missing.
-     Optional `--archive-dir PATH`, `--temp-dir PATH` and `--backup-dir PATH`
-     override the default `Archive`, `TakeOutBack/temp` and `Backup` directories.
+     `TakeOutBack/{tools,config,logs}` exist; create missing.
+     Optional `--archive-dir PATH` and `--backup-dir PATH` override the default
+     `Archive` and `Backup` directories.
    - Determine the current consolidated archive by scanning the configured
      archive directory for the lexicographically greatest `Consolidated-*.zip`
      name (timestamp format is sortable; timestamps are in local time).
-   - Remove any leftover per-execution temp directories from a previously
-     interrupted run.
    - Remove any leftover `*.tmp`, `*.rebuild` or `*.compact` files in the archive
      directory.
    - Discover incoming archives (`Incoming/*.zip` by default, or `--incoming`).
@@ -425,25 +423,26 @@ on its own, so the file body is **self-describing**.
    - Acquire a cross-run lockfile `Archive/.consolidated.lock`. If it exists and
      the recorded PID is alive, abort with a clear message; otherwise treat it as
      stale and remove it.
-   - If a current consolidated archive exists, copy it to `Backup/` (or the
-     custom backup directory) before any modification. Show a byte-based progress
-     bar during the copy. Keep the 5 most recent backups and remove older ones.
+   - If a current consolidated archive exists and `--no-backup` was not given,
+     copy it to `Backup/` (or the custom backup directory) before any
+     modification. Show a byte-based progress bar during the copy. Keep the 5
+     most recent backups and remove older ones.
 
 3. **Recovery check**
    - Verify the current consolidated archive's EoCD/CD integrity.
-   - If inconsistent, run **Recovery** (§9) before proceeding.
+   - If inconsistent, ask for confirmation; if the user agrees, run **Recovery**
+     (§9) before proceeding.
 
 4. **Load existing index**
    - Load `IndexExisting` = `path → entry` from the current consolidated archive's
      central directory (fast: parse CD only). Print the number of loaded entries.
 
 5. **Build new archives**
-   - Create a fresh per-execution directory under the configured temp directory.
-   - Create the temporary consolidated archive. For subsequent imports, also
-     create a temporary `Added-*.zip.tmp`. For the initial import, no Added
-     archive is produced.
+   - Create the new consolidated archive directly in `Archive/` with a fresh
+     timestamped name. For subsequent imports, also create an `Added-*.zip` in
+     `Archive/`. For the initial import, no Added archive is produced.
    - Copy all existing entries from the current archive into the new consolidated
-     temporary file. Show an entry-based progress bar during this copy.
+     archive. Show an entry-based progress bar during this copy.
    - For each valid incoming archive, render a per-archive progress bar and
      process every entry:
      - Skip unchanged entries (identical CRC and size).
@@ -452,24 +451,21 @@ on its own, so the file body is **self-describing**.
      - For modified entries, write the versioned name (`name__vN.ext`) to the
        new consolidated archive and, for subsequent imports, to the `Added`
        archive.
-   - Write the central directory and EoCD to the temporary consolidated archive
-     and, when applicable, to the temporary Added archive.
+   - Write the central directory and EoCD to the consolidated archive and, when
+     applicable, to the Added archive.
 
-6. **Atomic switch**
-   - `fsync` and close the temporary files.
-   - Rename them to their final `Archive/Consolidated-*.zip` and, when applicable,
-     `Archive/Added-*.zip` names.
+6. **Switch**
+   - `fsync` and close the new archives.
    - Remove the previous consolidated archive from `Archive/` (it is already in
-     `Backup/`).
+     `Backup/` if backup was enabled).
 
 7. **Finalize state and cleanup**
    - Write `Archive/state.json` and `Archive/cd.bak` atomically.
    - Release the lockfile.
-   - Remove the per-execution temp directory.
 
 8. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
    including the paths of the new consolidated archive and, when applicable,
-   the added archive.
+   the added archive. Write the same summary to `Archive/Consolidated-*.txt`.
 
 ### 6.3 Worst-case complexity
 
@@ -507,12 +503,12 @@ because the archive is rebuilt from scratch on every sync.
 
 - The previous consolidated archive is **copied to `Backup/`** before any write
   begins, so it is always recoverable.
-- The new consolidated archive and the `Added` archive are written into temporary
-  files (`*.tmp`). The old archive is never opened for writing.
-- At any instant of failure, the previous consolidated archive remains intact.
-- Temporary files are either complete and valid (and will be renamed on the next
-  successful sync) or incomplete and ignored by the scanner, which only looks at
-  `Consolidated-*.zip` files without the `.tmp` suffix.
+- The new consolidated archive is written directly into `Archive/` with a fresh
+  timestamped name. The old archive is never opened for writing.
+- At any instant of failure, the previous consolidated archive remains intact
+  (and a copy exists in `Backup/` unless `--no-backup` was used).
+- The scanner only looks at `Consolidated-*.zip` files, so an incomplete new file
+  will be ignored if a previous valid archive still exists.
 - The two sidecars (`state.json` + `cd.bak`) are tiny and renamed atomically
   (Windows-safe rename-in-same-dir). Their loss degrades only performance
   (startup may need a full LFH scan), not correctness.
@@ -533,7 +529,7 @@ Because the consolidated archive is already rebuilt from scratch on every sync,
 `--compact` is rarely needed. It is kept as a manual repair tool:
 
 - Snapshot the current valid CD in memory.
-- Stream-copy all referenced payloads (raw bytes) into a temporary file.
+- Stream-copy all referenced payloads (raw bytes) into a system temp file.
 - Write a single new CD + EoCD.
 - Fsync, atomic `os.Rename` over the current consolidated archive.
 - Update sidecars.
@@ -631,11 +627,11 @@ Power-failure / force-quit / USB-yank / Ctrl+C modes covered:
 
 | Crash point | Result on next run |
 |---|---|
-| Before temporary files are created | Old archive untouched; nothing to do. |
-| While copying existing entries | Temporary file is incomplete; ignored. Old archive remains current. |
-| While adding new entries | Temporary file is incomplete; ignored. Old archive remains current. |
-| During rename of temporary files | At least one of the temporary files or the new archive is valid. The scanner picks the latest valid `Consolidated-*.zip`. |
-| After rename, before sidecar update | File is consistent; we derive the sidecar from the trailing CD. |
+| Before new archive is created | Old archive untouched; nothing to do. |
+| While copying existing entries | New archive is incomplete; scanner ignores it. Old archive remains current. |
+| While adding new entries | New archive is incomplete; scanner ignores it. Old archive remains current. |
+| During removal of old archive | New archive is already complete and valid; scanner picks it. |
+| After old archive removal, before sidecar update | File is consistent; we derive the sidecar from the trailing CD. |
 | Mid-sidecar write (rename aborts) | The atomic rename means EITHER old OR new sidecar exists; never a partial file. |
 | Lockfile left behind | Detected as stale if the recorded PID is dead; removed automatically. |
 
@@ -675,8 +671,6 @@ demand; it is too expensive to do on every sync.
     │   │   └── takeoutback           # native binary (Linux x86_64)
     │   └── windows/
     │       └── takeoutback.exe       # native binary (Windows x86_64)
-    ├── temp/                         # parent temp directory
-    │   └── run-YYYYMMDD-HHMMSS.mmm/  # per-execution temp directory
     ├── logs/
     │   └── YYYY-MM-DD.log
     ├── config/
@@ -944,7 +938,12 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
-- **v0.4.4** — interactive menu with custom paths, pre-sync integrity check, backup cleanup prompt, `clean` command, targeted `update --version`, version banner and skipped-files count fix.
+- **v0.4.5** — direct-to-Archive sync (no project temp directory), `--no-backup`,
+  always-timestamped consolidated archive, per-archive summary `.txt`, version
+  printed first on every launch, explicit `Errors` counter.
+- **v0.4.4** — interactive menu with custom paths, pre-sync integrity check,
+  backup cleanup prompt, `clean` command, targeted `update --version`, version
+  banner and skipped-files count fix.
 - **v0.4.3** — progress bars for backup and existing-entry copy, earlier archive list.
 - **v0.5.0** — `update` self-updater + checksum verification + release automated
   via Actions (if maintainer enables).

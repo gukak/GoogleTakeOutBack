@@ -29,6 +29,7 @@ type Report struct {
 	NewFiles        int
 	ModifiedFiles   int
 	SkippedFiles    int
+	Errors          int
 	BytesAppended   int64
 	Duration        time.Duration
 }
@@ -39,6 +40,7 @@ func Sync(env *app.Env, args []string) error {
 	env.Logf("info", "starting sync, version=%s", app.Version)
 
 	incomingDir := env.Incoming
+	noBackup := false
 	i := 0
 	for i < len(args) {
 		if args[i] == "--incoming" && i+1 < len(args) {
@@ -48,6 +50,11 @@ func Sync(env *app.Env, args []string) error {
 		}
 		if strings.HasPrefix(args[i], "--incoming=") {
 			incomingDir = strings.TrimPrefix(args[i], "--incoming=")
+			i++
+			continue
+		}
+		if args[i] == "--no-backup" {
+			noBackup = true
 			i++
 			continue
 		}
@@ -91,19 +98,10 @@ func Sync(env *app.Env, args []string) error {
 	}
 	defer releaseLock(lockFile)
 
-	runDir, err := makeTempRunDir(env.TempDir)
-	if err != nil {
-		return fmt.Errorf("cannot create temp run directory: %w", err)
-	}
-	defer os.RemoveAll(runDir)
-
-	// Ensure Archive/ only contains final Consolidated and Added zips.
-	cleanupArchiveTempFiles(env.Archive)
-
 	report := &Report{ArchivesScanned: len(incomingFiles)}
 
 	// Backup the current consolidated archive before modifying anything.
-	if currentArchive != "" {
+	if !noBackup && currentArchive != "" {
 		if err := backupArchive(env, currentArchive); err != nil {
 			return fmt.Errorf("cannot backup current archive: %w", err)
 		}
@@ -112,7 +110,7 @@ func Sync(env *app.Env, args []string) error {
 		}
 	}
 
-	if err := recoverArchive(env, currentArchive, runDir); err != nil {
+	if err := recoverArchive(env, currentArchive); err != nil {
 		return fmt.Errorf("recovery failed: %w", err)
 	}
 
@@ -133,24 +131,22 @@ func Sync(env *app.Env, args []string) error {
 	ts := time.Now()
 	newArchiveName := timestampName("Consolidated", ts)
 	newArchivePath := uniqueArchivePath(env.Archive, newArchiveName)
-	newArchiveTmp := filepath.Join(runDir, newArchiveName+".tmp")
 
-	newDst, err := zipx.OpenOrCreate(newArchiveTmp)
+	newDst, err := zipx.OpenOrCreate(newArchivePath)
 	if err != nil {
 		return fmt.Errorf("cannot create new archive: %w", err)
 	}
 
 	var addedDst *os.File
-	var addedArchivePath, addedArchiveTmp string
+	var addedArchivePath string
 	var addedEntries []*zipx.Entry
 	if !isInitial {
 		addedArchiveName := timestampName("Added", ts)
 		addedArchivePath = uniqueArchivePath(env.Archive, addedArchiveName)
-		addedArchiveTmp = filepath.Join(runDir, addedArchiveName+".tmp")
-		addedDst, err = zipx.OpenOrCreate(addedArchiveTmp)
+		addedDst, err = zipx.OpenOrCreate(addedArchivePath)
 		if err != nil {
 			_ = newDst.Close()
-			cleanupSync(newArchiveTmp)
+			_ = os.Remove(newArchivePath)
 			return fmt.Errorf("cannot create added archive: %w", err)
 		}
 	}
@@ -163,7 +159,12 @@ func Sync(env *app.Env, args []string) error {
 		fmt.Printf("Copying %d existing entries into the new archive...\n", len(existingEntries))
 		oldFile, err := os.Open(currentArchive)
 		if err != nil {
-			cleanupSync(newArchiveTmp, addedArchiveTmp)
+			_ = newDst.Close()
+			_ = os.Remove(newArchivePath)
+			if addedDst != nil {
+				_ = addedDst.Close()
+				_ = os.Remove(addedArchivePath)
+			}
 			return fmt.Errorf("cannot open current archive: %w", err)
 		}
 		copyBar := newProgressBar(len(existingEntries), "existing entries")
@@ -171,7 +172,12 @@ func Sync(env *app.Env, args []string) error {
 			copyBar.update(i)
 			if _, err := zipx.CopyRawEntry(newDst, oldFile, e); err != nil {
 				_ = oldFile.Close()
-				cleanupSync(newArchiveTmp, addedArchiveTmp)
+				_ = newDst.Close()
+				_ = os.Remove(newArchivePath)
+				if addedDst != nil {
+					_ = addedDst.Close()
+					_ = os.Remove(addedArchivePath)
+				}
 				return fmt.Errorf("cannot copy existing entry %s: %w", e.Name, err)
 			}
 		}
@@ -207,14 +213,18 @@ func Sync(env *app.Env, args []string) error {
 				e.Name = app.InsertVersionSuffix(head.Name, next)
 				written, err = zipx.CopyRawEntry(newDst, src.File, e)
 				if err != nil {
+					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
+					fmt.Printf("Error: cannot append %s: %v\n", e.Name, err)
 					continue
 				}
 				report.ModifiedFiles++
 			} else {
 				written, err = zipx.CopyRawEntry(newDst, src.File, e)
 				if err != nil {
+					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
+					fmt.Printf("Error: cannot append %s: %v\n", e.Name, err)
 					continue
 				}
 				report.NewFiles++
@@ -239,17 +249,6 @@ func Sync(env *app.Env, args []string) error {
 		_ = src.Close()
 	}
 
-	if !appended {
-		_ = newDst.Close()
-		if addedDst != nil {
-			_ = addedDst.Close()
-		}
-		cleanupSync(newArchiveTmp, addedArchiveTmp)
-		env.Log("info", "no new or modified files to append")
-		printReport(env, report, start)
-		return nil
-	}
-
 	sort.SliceStable(allEntries, func(i, j int) bool {
 		return allEntries[i].LocalHeaderOff < allEntries[j].LocalHeaderOff
 	})
@@ -257,42 +256,48 @@ func Sync(env *app.Env, args []string) error {
 	// Write the new consolidated archive.
 	eocd, err := zipx.WriteCentralDir(newDst, allEntries)
 	if err != nil {
-		cleanupSync(newArchiveTmp, addedArchiveTmp)
+		_ = newDst.Close()
+		_ = os.Remove(newArchivePath)
+		if addedDst != nil {
+			_ = addedDst.Close()
+			_ = os.Remove(addedArchivePath)
+		}
 		return fmt.Errorf("write central directory: %w", err)
 	}
 	if err := newDst.Sync(); err != nil {
-		cleanupSync(newArchiveTmp, addedArchiveTmp)
+		_ = newDst.Close()
+		_ = os.Remove(newArchivePath)
+		if addedDst != nil {
+			_ = addedDst.Close()
+			_ = os.Remove(addedArchivePath)
+		}
 		return err
 	}
 	if err := newDst.Close(); err != nil {
-		cleanupSync(newArchiveTmp, addedArchiveTmp)
+		_ = os.Remove(newArchivePath)
+		if addedDst != nil {
+			_ = os.Remove(addedArchivePath)
+		}
 		return err
 	}
 
-	// Write the Added archive only for subsequent imports.
+	// Write the Added archive only for subsequent imports when something changed.
 	if addedDst != nil {
-		if err := writeAddedArchive(addedDst, addedEntries); err != nil {
-			cleanupSync(newArchiveTmp, addedArchiveTmp)
-			return fmt.Errorf("write added archive: %w", err)
+		if appended {
+			if err := writeAddedArchive(addedDst, addedEntries); err != nil {
+				_ = os.Remove(newArchivePath)
+				_ = os.Remove(addedArchivePath)
+				return fmt.Errorf("write added archive: %w", err)
+			}
+		} else {
+			_ = addedDst.Close()
+			_ = os.Remove(addedArchivePath)
+			addedArchivePath = ""
 		}
 	}
 
-	// Move temporary files to their final timestamped names.
-	if err := os.Rename(newArchiveTmp, newArchivePath); err != nil {
-		cleanupSync(newArchiveTmp, addedArchiveTmp)
-		return fmt.Errorf("rename new archive: %w", err)
-	}
-	if addedDst != nil {
-		if err := os.Rename(addedArchiveTmp, addedArchivePath); err != nil {
-			_ = os.Remove(newArchivePath)
-			cleanupSync(newArchiveTmp, addedArchiveTmp)
-			return fmt.Errorf("rename added archive: %w", err)
-		}
-	}
-
-	// The old consolidated archive is now superseded; remove it from Archive
-	// because a copy already lives in Backup.
-	if currentArchive != "" {
+	// The old consolidated archive is now superseded; remove it.
+	if currentArchive != "" && currentArchive != newArchivePath {
 		_ = os.Remove(currentArchive)
 	}
 
@@ -327,6 +332,13 @@ func Sync(env *app.Env, args []string) error {
 	if addedArchivePath != "" {
 		env.Summary("Added:   %s", addedArchivePath)
 	}
+
+	// Write a human-readable summary next to the consolidated archive.
+	summaryPath := strings.TrimSuffix(newArchivePath, ".zip") + ".txt"
+	if err := writeSummary(summaryPath, env, report, start, newArchivePath, addedArchivePath); err != nil {
+		env.Logf("warn", "could not write summary file: %v", err)
+	}
+
 	env.Logf("info", "sync completed in %s, archive=%s", report.Duration, newArchivePath)
 	return nil
 }
@@ -384,44 +396,6 @@ func uniqueArchivePath(dir, name string) string {
 		}
 	}
 	return filepath.Join(dir, name)
-}
-
-// makeTempRunDir creates a fresh per-execution temp directory under parent and
-// removes any leftover run-* directories from previous interrupted runs.
-func makeTempRunDir(parent string) (string, error) {
-	entries, _ := os.ReadDir(parent)
-	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "run-") {
-			_ = os.RemoveAll(filepath.Join(parent, e.Name()))
-		}
-	}
-	base := filepath.Join(parent, fmt.Sprintf("run-%s", time.Now().Local().Format("20060102-150405.000")))
-	runDir := base
-	for i := 1; i < 1000; i++ {
-		if _, err := os.Stat(runDir); os.IsNotExist(err) {
-			break
-		}
-		runDir = fmt.Sprintf("%s_%d", base, i)
-	}
-	if err := os.MkdirAll(runDir, 0755); err != nil {
-		return "", err
-	}
-	return runDir, nil
-}
-
-// cleanupArchiveTempFiles removes any leftover temporary files from the Archive
-// directory. After cleanup only final Consolidated and Added zips should remain.
-func cleanupArchiveTempFiles(dir string) {
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".rebuild") || strings.HasSuffix(name, ".compact") {
-			_ = os.Remove(filepath.Join(dir, name))
-		}
-	}
 }
 
 func backupArchive(env *app.Env, src string) error {
@@ -669,9 +643,38 @@ func printReport(env *app.Env, r *Report, start time.Time) {
 	env.Summary("New files        : %d", r.NewFiles)
 	env.Summary("Modified files   : %d", r.ModifiedFiles)
 	env.Summary("Skipped files    : %d", r.SkippedFiles)
+	env.Summary("Errors           : %d", r.Errors)
 	env.Summary("Bytes appended   : %s", humanSize(r.BytesAppended))
 	env.Summary("Duration         : %s", formatDuration(d))
-	env.Summary("Status           : OK")
+	if r.Errors > 0 {
+		env.Summary("Status           : Completed with errors")
+	} else {
+		env.Summary("Status           : OK")
+	}
+}
+
+func writeSummary(path string, env *app.Env, r *Report, start time.Time, archivePath, addedPath string) error {
+	var b strings.Builder
+	d := time.Since(start)
+	fmt.Fprintf(&b, "TakeOutBack %s\n", app.Version)
+	fmt.Fprintf(&b, "Archives scanned : %d\n", r.ArchivesScanned)
+	fmt.Fprintf(&b, "Files scanned    : %d\n", r.FilesScanned)
+	fmt.Fprintf(&b, "New files        : %d\n", r.NewFiles)
+	fmt.Fprintf(&b, "Modified files   : %d\n", r.ModifiedFiles)
+	fmt.Fprintf(&b, "Skipped files    : %d\n", r.SkippedFiles)
+	fmt.Fprintf(&b, "Errors           : %d\n", r.Errors)
+	fmt.Fprintf(&b, "Bytes appended   : %s\n", humanSize(r.BytesAppended))
+	fmt.Fprintf(&b, "Duration         : %s\n", formatDuration(d))
+	if r.Errors > 0 {
+		fmt.Fprintln(&b, "Status           : Completed with errors")
+	} else {
+		fmt.Fprintln(&b, "Status           : OK")
+	}
+	fmt.Fprintf(&b, "Archive: %s\n", archivePath)
+	if addedPath != "" {
+		fmt.Fprintf(&b, "Added:   %s\n", addedPath)
+	}
+	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
 func humanSize(n int64) string {
@@ -696,9 +699,9 @@ func formatDuration(d time.Duration) string {
 }
 
 // recoverArchive validates and, if necessary, repairs the consolidated archive.
-// tempDir is a per-execution temporary directory; any rebuilt archive is written
-// there and then renamed over archivePath.
-func recoverArchive(env *app.Env, archivePath, tempDir string) error {
+// Any rebuilt archive is written to a system temp directory and then renamed
+// over archivePath.
+func recoverArchive(env *app.Env, archivePath string) error {
 	if archivePath == "" {
 		return nil
 	}
@@ -756,6 +759,12 @@ func recoverArchive(env *app.Env, archivePath, tempDir string) error {
 		return os.Truncate(archivePath, 0)
 	}
 
+	tempDir, err := os.MkdirTemp("", "takeoutback-recover-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
 	rebuildTmp := filepath.Join(tempDir, filepath.Base(archivePath)+".rebuild")
 	dst, err := zipx.OpenOrCreate(rebuildTmp)
 	if err != nil {
@@ -791,18 +800,17 @@ func recoverArchive(env *app.Env, archivePath, tempDir string) error {
 	return nil
 }
 
-// Clean removes all user data (Incoming, Archive, Backup and temp files) and
-// resets TakeOutBack to a fresh-install state. Settings and logs are preserved.
+// Clean removes all user data (Incoming, Archive and Backup files) and resets
+// TakeOutBack to a fresh-install state. Settings and logs are preserved.
 func Clean(env *app.Env, args []string) error {
 	fmt.Println("Clean will remove all files from:")
 	fmt.Printf("  Incoming: %s\n", env.Incoming)
 	fmt.Printf("  Archive:  %s\n", env.Archive)
 	fmt.Printf("  Backup:   %s\n", env.Backup)
-	fmt.Printf("  Temp:     %s\n", env.TempDir)
 	if !confirm("Are you sure? (y/N): ") {
 		return nil
 	}
-	dirs := []string{env.Incoming, env.Archive, env.Backup, env.TempDir}
+	dirs := []string{env.Incoming, env.Archive, env.Backup}
 	for _, d := range dirs {
 		if err := removeDirContents(d); err != nil {
 			return err
@@ -1012,9 +1020,9 @@ func Compact(env *app.Env, args []string) error {
 		return nil
 	}
 
-	runDir, err := makeTempRunDir(env.TempDir)
+	runDir, err := os.MkdirTemp("", "takeoutback-compact-*")
 	if err != nil {
-		return fmt.Errorf("cannot create temp run directory: %w", err)
+		return fmt.Errorf("cannot create temp directory: %w", err)
 	}
 	defer os.RemoveAll(runDir)
 

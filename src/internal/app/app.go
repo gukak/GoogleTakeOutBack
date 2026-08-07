@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the current takeoutback version. It is overridden at build time.
-const Version = "v0.4.4"
+const Version = "v0.4.5"
 
 // OwnerRepo is the GitHub owner/repository used by the installer and updater.
 // Change this to the real repository before the first release.
@@ -30,7 +30,6 @@ const (
 	ToolsDir      = "tools"
 	ConfigDir     = "config"
 	LogsDir       = "logs"
-	TempDir       = "temp"
 	ScriptsDir    = "scripts"
 	DocsDir       = "docs"
 
@@ -88,27 +87,25 @@ func DefaultPolicy() Policy {
 
 // EnvOptions configures the runtime environment.
 type EnvOptions struct {
-	Root      string
+	Root       string
 	ArchiveDir string
-	TempDir   string
-	BackupDir string
+	BackupDir  string
 }
 
 // Env holds the resolved project layout and runtime services.
 type Env struct {
-	Root      string
-	Incoming  string
-	Archive   string
-	Backup    string
-	StatePath string
-	BackupCD  string
-	LockPath  string
-	AppRoot   string
+	Root       string
+	Incoming   string
+	Archive    string
+	Backup     string
+	StatePath  string
+	BackupCD   string
+	LockPath   string
+	AppRoot    string
 	ToolsLinux string
 	ToolsWin   string
 	ConfigDir  string
 	LogsDir    string
-	TempDir    string
 	Settings   Settings
 	Policy     Policy
 
@@ -117,7 +114,7 @@ type Env struct {
 }
 
 // NewEnv resolves the project root from the executable or the explicit flag.
-// Optional TempDir and BackupDir override the default layout.
+// Optional ArchiveDir and BackupDir override the default layout.
 func NewEnv(opts EnvOptions) (*Env, error) {
 	root, err := resolveRoot(opts.Root)
 	if err != nil {
@@ -148,16 +145,9 @@ func NewEnv(opts EnvOptions) (*Env, error) {
 	e.ToolsWin = filepath.Join(e.AppRoot, ToolsDir, "windows", WindowsBinaryName)
 	e.ConfigDir = filepath.Join(e.AppRoot, ConfigDir)
 	e.LogsDir = filepath.Join(e.AppRoot, LogsDir)
-	if opts.TempDir != "" {
-		if e.TempDir, err = filepath.Abs(opts.TempDir); err != nil {
-			return nil, fmt.Errorf("cannot resolve temp directory %q: %w", opts.TempDir, err)
-		}
-	} else {
-		e.TempDir = filepath.Join(e.AppRoot, TempDir)
-	}
 	e.logStart = time.Now()
 
-	if err := ensureLayout(root, e.Archive, e.Backup, e.TempDir); err != nil {
+	if err := ensureLayout(root, e.Archive, e.Backup); err != nil {
 		return nil, err
 	}
 	if err := e.loadSettings(); err != nil {
@@ -260,7 +250,7 @@ func hasRootMarkers(d string) bool {
 	return true
 }
 
-func ensureLayout(root, archiveDir, backupDir, tempDir string) error {
+func ensureLayout(root, archiveDir, backupDir string) error {
 	dirs := []string{
 		filepath.Join(root, IncomingDir),
 		archiveDir,
@@ -270,7 +260,6 @@ func ensureLayout(root, archiveDir, backupDir, tempDir string) error {
 		filepath.Join(root, AppDir, ToolsDir, "windows"),
 		filepath.Join(root, AppDir, ConfigDir),
 		filepath.Join(root, AppDir, LogsDir),
-		tempDir,
 		filepath.Join(root, AppDir, ScriptsDir),
 		filepath.Join(root, AppDir, DocsDir),
 	}

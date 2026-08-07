@@ -5,7 +5,7 @@
 set -euo pipefail
 
 OWNER_REPO="gukak/GoogleTakeOutBack"
-VERSION="${TAKEOUTBACK_VERSION:-v0.4.4}"
+VERSION="${TAKEOUTBACK_VERSION:-v0.4.5}"
 FETCH_BOTH="${TAKEOUTBACK_FETCH_BOTH:-1}"
 FORCE=0
 
@@ -43,11 +43,10 @@ if [ "$FORCE" -eq 0 ]; then
     fi
 fi
 
-mkdir -p "$ROOT/Incoming" "$ROOT/Archive"
+mkdir -p "$ROOT/Incoming" "$ROOT/Archive" "$ROOT/Backup"
 mkdir -p "$ROOT/TakeOutBack/app"
 mkdir -p "$ROOT/TakeOutBack/tools/linux"
 mkdir -p "$ROOT/TakeOutBack/tools/windows"
-mkdir -p "$ROOT/TakeOutBack/temp"
 mkdir -p "$ROOT/TakeOutBack/logs"
 mkdir -p "$ROOT/TakeOutBack/config"
 mkdir -p "$ROOT/TakeOutBack/scripts"

@@ -16,25 +16,27 @@
 TakeOutBack writes the following files:
 
 - `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — the current consolidated archive
-  (timestamps are in the system's local time).
+  (timestamps are in the system's local time). The consolidated archive always
+  gets a new timestamped name, even when every incoming file is skipped.
 - `Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` — only the files added during this run.
-  This file is created only for subsequent imports; the first import produces only
-  the consolidated archive.
+  This file is created only for subsequent imports that contain new or modified
+  files; the first import produces only the consolidated archive.
+- `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.txt` — a human-readable summary of the
+  run, identical to the console output.
 - `Backup/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — a copy of the previous consolidated
   archive, kept before it is replaced. The last 5 backups are retained.
 
-All temporary work is done inside `TakeOutBack/temp/run-YYYYMMDD-HHMMSS.mmm/` by
-default. You can override the archive, temp and backup directories from the
-command line:
+You can override the archive and backup directories from the command line:
 
 ```bash
-./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --temp-dir /path/to/fast/ssd --backup-dir /path/to/backup/disk
+./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --backup-dir /path/to/backup/disk
 ```
 
-That folder is removed at the end of a successful run and any leftover `run-*` folders
-from an interrupted run are removed at the start of the next run. As a result,
-the configured archive directory only contains final `Consolidated-*.zip`,
-`Added-*.zip` and the tiny `state.json` / `cd.bak` sidecars.
+To skip the backup copy:
+
+```bash
+./TakeOutBack.sh sync --no-backup
+```
 
 If a sync is interrupted (Ctrl+C, power loss, drive removal), the next run will
 automatically detect the stale lock and resume. Your previous consolidated archive
@@ -77,12 +79,13 @@ which is still readable.
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.4.4
+TakeOutBack v0.4.5
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523
 Modified files   : 12
 Skipped files    : 181810
+Errors           : 0
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
@@ -135,6 +138,12 @@ forever.
 Running `./TakeOutBack.sh` without arguments now shows the help and does **not**
 start a backup automatically. You must explicitly use the `sync` command.
 
+To skip the backup of the current consolidated archive:
+
+```bash
+./TakeOutBack.sh sync --no-backup
+```
+
 ### Verify
 
 ```bash
@@ -178,7 +187,7 @@ backups and incoming files are never touched.
 To install a specific release instead of the latest one:
 
 ```bash
-./TakeOutBack.sh update --version v0.4.4
+./TakeOutBack.sh update --version v0.4.5
 ```
 
 ### Clean / Reset
@@ -187,7 +196,7 @@ To install a specific release instead of the latest one:
 ./TakeOutBack.sh clean
 ```
 
-Removes all files from the incoming, archive, backup and temp directories after
+Removes all files from the incoming, archive and backup directories after
 asking for confirmation. This resets TakeOutBack to a fresh-install state while
 preserving settings and logs.
 
@@ -198,8 +207,9 @@ preserving settings and logs.
 ```
 
 Shows a numbered menu for users who prefer not to type commands. The menu lets
-you enter custom paths for the incoming, archive, temp and backup directories;
-the default path is shown in brackets and kept if you press Enter.
+you enter custom paths for the incoming, archive and backup directories; the
+default path is shown in brackets and kept if you press Enter. Before syncing,
+the menu also asks whether to create a backup of the current consolidated archive.
 
 ## Logs
 

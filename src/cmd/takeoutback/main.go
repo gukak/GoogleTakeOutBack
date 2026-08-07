@@ -19,6 +19,13 @@ func main() {
 	var sub []string
 	cmd := ""
 
+	// Handle --version before the banner so it is not printed twice.
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println(app.Version)
+		return
+	}
+	fmt.Printf("TakeOutBack %s\n", app.Version)
+
 	for i := 1; i < len(os.Args); {
 		a := os.Args[i]
 
@@ -42,13 +49,8 @@ func main() {
 			i++
 			continue
 		}
-		if a == "--temp-dir" && i+1 < len(os.Args) {
-			opts.TempDir = os.Args[i+1]
-			i += 2
-			continue
-		}
-		if strings.HasPrefix(a, "--temp-dir=") {
-			opts.TempDir = strings.TrimPrefix(a, "--temp-dir=")
+		if a == "--no-backup" {
+			sub = append(sub, a)
 			i++
 			continue
 		}
@@ -154,13 +156,12 @@ Global options:
   --root PATH       Use PATH as the project root instead of auto-detecting
   --archive-dir PATH Use PATH to store the consolidated archive
                      (default: Archive)
-  --temp-dir PATH   Use PATH as the temporary work directory
-                    (default: TakeOutBack/temp)
   --backup-dir PATH Use PATH to store backup copies of the consolidated archive
                     (default: Backup)
 
 Sync options:
   --incoming PATH   Use PATH as the source folder instead of Incoming/
+  --no-backup       Do not copy the current archive to Backup/ before sync
 
 When 'sync' is invoked, TakeOutBack lists the incoming archives and starts the
 backup immediately.`, app.Version)
@@ -169,7 +170,6 @@ backup immediately.`, app.Version)
 
 func menuLoop(defaultRoot string) error {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf("\nTakeOutBack %s\n", app.Version)
 	for {
 		fmt.Println(`
 TakeOutBack Menu
@@ -255,7 +255,6 @@ TakeOutBack Menu
 func promptBaseOptions(reader *bufio.Reader, defaultRoot string) app.EnvOptions {
 	opts := app.EnvOptions{Root: defaultRoot}
 	opts.ArchiveDir = promptPath(reader, "Archive directory", "Archive")
-	opts.TempDir = promptPath(reader, "Temp directory", "TakeOutBack/temp")
 	opts.BackupDir = promptPath(reader, "Backup directory", "Backup")
 	return opts
 }
@@ -267,7 +266,20 @@ func promptSyncOptions(reader *bufio.Reader, defaultRoot string) (app.EnvOptions
 	if incoming != "" {
 		args = []string{"--incoming", incoming}
 	}
+	if !confirm(reader, "Create backup of current archive? [Y/n]: ") {
+		args = append(args, "--no-backup")
+	}
 	return opts, args
+}
+
+func confirm(reader *bufio.Reader, prompt string) bool {
+	fmt.Print(prompt)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return true
+	}
+	line = strings.ToLower(strings.TrimSpace(line))
+	return line == "" || line == "y" || line == "yes"
 }
 
 func promptUpdateVersion(reader *bufio.Reader) string {
