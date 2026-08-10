@@ -99,17 +99,22 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 	assetURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", app.OwnerRepo, version, binName)
 	sumURL := assetURL + ".sha256"
 
+	// GitHub asset downloads redirect to a CDN. Use a client that follows
+	// redirects for the actual file downloads, while the caller's client is
+	// kept redirect-less for the /releases/latest HEAD resolution.
+	downloadClient := &http.Client{Timeout: 60 * time.Second}
+
 	env.Summary("Downloading %s...", version)
 	binPath := filepath.Join(filepath.Dir(env.BinaryPath()), ".tmp", binName)
 	if err := os.MkdirAll(filepath.Dir(binPath), 0755); err != nil {
 		return err
 	}
-	if err := downloadFile(client, assetURL, binPath); err != nil {
+	if err := downloadFile(downloadClient, assetURL, binPath); err != nil {
 		return err
 	}
 	defer os.Remove(binPath)
 
-	expected, err := downloadText(client, sumURL)
+	expected, err := downloadText(downloadClient, sumURL)
 	if err != nil {
 		return fmt.Errorf("cannot fetch checksum: %w", err)
 	}
