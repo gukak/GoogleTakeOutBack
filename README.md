@@ -52,10 +52,11 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.9/install.
 2. Run the backup command:
    - Linux: `./TakeOutBack.sh sync`
    - Windows: `TakeOutBack.bat sync`
-3. Watch the progress: each archive is listed, then a progress bar shows the
-   files being processed in real time. On subsequent imports you will also see
-   progress bars for the backup of the current archive and for copying the
-   existing entries into the new consolidated archive.
+3. Watch the progress: each archive is listed, then a byte-based progress bar
+   shows the compressed megabytes being processed in real time. The bar advances
+   smoothly even for a single very large file, and skipped/duplicate entries
+   still advance the count. On subsequent imports you will also see a progress
+   bar for the backup of the current archive.
 4. Repeat whenever you have a new Takeout export.
 
 Your consolidated archive lives at `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`
@@ -64,6 +65,14 @@ first import creates only the consolidated archive. Every later sync that
 contains new or modified files also produces a companion
 `Added-YYYYMMDD-HHMMSS.mmm.zip` with only the files imported during that run, and
 copies the previous consolidated archive to `Backup/` before replacing it.
+
+The current consolidated archive is never modified in place. Before appending
+new files, TakeOutBack records the current central-directory offsets in
+`state.json` and backs up the central directory in `cd.bak`. New payloads are
+appended after the existing end-of-central-directory record, and a fresh central
+directory is written after them. If a run is interrupted by a power loss, drive
+removal, or a full disk, the existing archive stays valid and `verify archive`
+continues to work; a fresh sync can be started as soon as space is available.
 
 You can override the archive and backup directories from the command line:
 
@@ -83,6 +92,13 @@ You can also sync from a different source folder:
 ./TakeOutBack.sh sync --incoming /path/to/other/zips
 ```
 
+To skip the `Added-*` archive that normally contains only the new or modified
+files from a subsequent import:
+
+```bash
+./TakeOutBack.sh sync --no-added
+```
+
 ### Live progress
 
 During a sync you will see the list of archives and a per-archive progress bar:
@@ -91,8 +107,8 @@ During a sync you will see the list of archives and a per-archive progress bar:
 Archives to process: 2
   1. takeout-2025-001.zip
   2. takeout-2025-002.zip
-  [==============================] takeout-2025-001.zip 1542/1542 (100%)
-  [===========>                  ] takeout-2025-002.zip  623/1823 (34%)
+  [==============================] takeout-2025-001.zip 45.2 MB / 45.2 MB (100%)
+  [===========>                  ] takeout-2025-002.zip 18.6 MB / 52.4 MB (35%)
 ```
 
 When the run finishes, the usual summary is printed, including the paths to the

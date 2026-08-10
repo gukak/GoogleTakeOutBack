@@ -8,9 +8,11 @@
    - Linux: `./TakeOutBack.sh sync`
    - Windows: `TakeOutBack.bat sync`
 4. Watch the live progress: TakeOutBack lists the archives it found, then shows
-   a progress bar for each archive while it is being processed. On subsequent
-   imports, progress bars are also shown for backing up the current consolidated
-   archive and for copying its existing entries into the new archive.
+   a byte-based progress bar for each archive while it is being processed (for
+   example `12.4 MB / 156.8 MB (8%)`). The bar advances smoothly even when a
+   single file is very large, because payload bytes are reported as they are
+   copied. On subsequent imports, progress bars are also shown for backing up
+   the current consolidated archive.
 5. Read the final summary printed to the console.
 
 TakeOutBack writes the following files:
@@ -38,9 +40,21 @@ To skip the backup copy:
 ./TakeOutBack.sh sync --no-backup
 ```
 
-If a sync is interrupted (Ctrl+C, power loss, drive removal), the next run will
-automatically detect the stale lock and resume. Your previous consolidated archive
-is untouched because TakeOutBack never modifies it in place.
+To skip the companion `Added-*` archive (only the consolidated archive is
+produced):
+
+```bash
+./TakeOutBack.sh sync --no-added
+```
+
+If a sync is interrupted (Ctrl+C, power loss, drive removal, full disk), the
+next run will automatically detect the stale lock and resume. Your previous
+consolidated archive is untouched because TakeOutBack never modifies it in
+place: it records the current central-directory offsets in `state.json` and
+backs up the central directory in `cd.bak` before appending new payloads. New
+files are added after the existing end-of-central-directory record, so the
+archive remains valid even if the run stops mid-write. A fresh sync can be
+started as soon as space is available.
 
 If you want to import from a different folder than `Incoming/`, use the
 `--incoming` option:
@@ -65,14 +79,16 @@ Archives to process: 4
   2. takeout-2025-001-of-002.zip
   3. takeout-2025-001-of-003.zip
   4. takeout-2025-001-of-004.zip
-  [===============================>] takeout-2025-001-of-001.zip 1542/1542 (100%)
-  [===========>                  ] takeout-2025-001-of-002.zip  623/1823 (34%)
+  [===============================>] takeout-2025-001-of-001.zip 45.2 MB / 45.2 MB (100%)
+  [===========>                  ] takeout-2025-001-of-002.zip 18.6 MB / 52.4 MB (35%)
 ```
 
 The progress bar is rendered with carriage returns (`\r`) so it updates in
-place in any terminal (Windows Command Prompt, PowerShell, Linux console). If
-stdout is redirected to a file or pipe, each update appears on its own line,
-which is still readable.
+place in any terminal (Windows Command Prompt, PowerShell, Linux console). It
+shows compressed megabytes processed versus the total compressed size of the
+incoming archive, so the percentage stays accurate even when many files are
+skipped or when one file dominates the archive. If stdout is redirected to a
+file or pipe, each update appears on its own line, which is still readable.
 
 ## Understanding the Summary
 

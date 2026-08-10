@@ -415,7 +415,7 @@ on its own, so the file body is **self-describing**.
    - Determine the current consolidated archive by scanning the configured
      archive directory for the lexicographically greatest `Consolidated-*.zip`
      name (timestamp format is sortable; timestamps are in local time).
-   - Remove any leftover `*.tmp`, `*.rebuild` or `*.compact` files in the archive
+   - Remove any leftover `*.rebuild` or `*.compact` files in the archive
      directory.
    - Discover incoming archives (`Incoming/*.zip` by default, or `--incoming`).
      Print a numbered list of the archives that will be processed.
@@ -438,25 +438,29 @@ on its own, so the file body is **self-describing**.
    - Load `IndexExisting` = `path → entry` from the current consolidated archive's
      central directory (fast: parse CD only). Print the number of loaded entries.
 
-5. **Append new entries**
-   - Open the current consolidated archive for append (`O_APPEND`). For the
-     initial import, create a fresh archive in `Archive/`.
-   - For subsequent imports, also create an `Added-*.zip` in `Archive/`. For the
-     initial import, no Added archive is produced.
-   - For each valid incoming archive, render a per-archive progress bar and
-     process every entry:
+5. **Preserve current state and append new entries**
+   - Before modifying the current consolidated archive, read its EOCD and
+     central directory, then atomically save `state.json` and `cd.bak` with the
+     current offsets and CD bytes. This allows recovery to restore the archive
+     to its pre-sync state if the run is interrupted.
+   - Open the current consolidated archive for append (`O_RDWR|O_APPEND`). For
+     the initial import, create a fresh archive in `Archive/`.
+   - For subsequent imports, also create an `Added-*.zip` in `Archive/` unless
+     `--no-added` was given. For the initial import no Added archive is produced.
+   - For each valid incoming archive, render a per-archive byte-based progress
+     bar and process every entry:
      - Skip unchanged entries (identical CRC and size).
      - For new entries, append them at the end of the consolidated archive and,
-       for subsequent imports, to the `Added` archive.
+       for subsequent imports when enabled, to the `Added` archive.
      - For modified entries, append the versioned name (`name__vN.ext`) at the
-       end of the consolidated archive and, for subsequent imports, to the
-       `Added` archive.
+       end of the consolidated archive and, when enabled, to the `Added` archive.
    - Existing payloads are never read or rewritten; only their central-directory
      records are reused.
 
 6. **Write central directory and switch**
    - Append a fresh central directory and EoCD at the end of the consolidated
-     archive. `fsync` and close.
+     archive, after any previous (now dead) central-directory blocks. `fsync`
+     and close.
    - Rename the modified archive to its final timestamped name and remove the
      previous name from `Archive/` (it is already in `Backup/` if backup was
      enabled).
@@ -637,8 +641,9 @@ Power-failure / force-quit / USB-yank / Ctrl+C modes covered:
 | Lockfile left behind | Detected as stale if the recorded PID is dead; removed automatically. |
 
 **No corruption ever survives**: the worst case is "the previous run is wasted
-and must be rerun". The current archive is opened for append only after a backup
-has been created, and recovery can always rebuild the central directory from the
+and must be rerun". The current archive is opened for append only after its
+pre-sync state has been recorded in `state.json`/`cd.bak` (and optionally copied
+to `Backup/`), and recovery can always rebuild the central directory from the
 local file headers.
 
 ### 9.1 Optional `.bak.shield` strategy
@@ -771,8 +776,9 @@ bash`/`| iex` also a self-repair / upgrade path.
 During sync the console shows:
 
 1. A numbered list of archives about to be processed.
-2. A per-archive ASCII progress bar redrawn in place (`\r`) showing entries
-   processed and percentage.
+2. A per-archive ASCII progress bar redrawn in place (`\r`) showing
+   compressed megabytes processed versus the total compressed size of the
+   archive and the percentage.
 
 Example:
 
@@ -782,8 +788,8 @@ Archives to process: 4
   2. takeout-2025-001-of-002.zip
   3. takeout-2025-001-of-003.zip
   4. takeout-2025-001-of-004.zip
-  [===============================>] takeout-2025-001-of-001.zip 1542/1542 (100%)
-  [===========>                  ] takeout-2025-001-of-002.zip  623/1823 (34%)
+  [===============================>] takeout-2025-001-of-001.zip 45.2 MB / 45.2 MB (100%)
+  [===========>                  ] takeout-2025-001-of-002.zip 18.6 MB / 52.4 MB (35%)
 ```
 
 When the run completes, the final summary is printed, including the paths of

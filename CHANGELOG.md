@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-08-10
+
+### Added
+- `--no-added` sync option (CLI and interactive menu) disables creation of the
+  `Added-*` archive that normally contains only the new/modified files from a
+  subsequent import.
+
+### Changed
+- Sync progress is now byte-based instead of entry-based. The progress bar shows
+  compressed megabytes processed versus the total compressed size of the
+  incoming archive (e.g. `1.91 MB / 7.63 MB (25%)`).
+- Large files no longer make the progress bar appear frozen: `CopyRawEntry`
+  reports written payload bytes incrementally through a callback so the bar
+  advances smoothly while a single big entry is being copied.
+- Skipped/duplicate entries advance the progress bar by their compressed size,
+  keeping the displayed percentage accurate throughout the sync.
+- Sync now preserves the current consolidated archive's EOCD/CD offsets and
+  central-directory bytes in `state.json`/`cd.bak` before appending anything.
+  Because existing payloads are appended at the end without touching the
+  original central directory, the archive remains valid and `verify` works even
+  if the run is interrupted by a disk-full or power-loss event. The next sync
+  can resume safely once space is available.
+
 ## [v0.4.9] - 2026-08-07
 
 ### Fixed

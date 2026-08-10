@@ -46,6 +46,7 @@ func Sync(env *app.Env, args []string) error {
 
 	incomingDir := env.Incoming
 	noBackup := false
+	noAdded := false
 	i := 0
 	for i < len(args) {
 		if args[i] == "--incoming" && i+1 < len(args) {
@@ -60,6 +61,11 @@ func Sync(env *app.Env, args []string) error {
 		}
 		if args[i] == "--no-backup" {
 			noBackup = true
+			i++
+			continue
+		}
+		if args[i] == "--no-added" {
+			noAdded = true
 			i++
 			continue
 		}
@@ -142,16 +148,29 @@ func Sync(env *app.Env, args []string) error {
 		return finalizeEmptySync(env, currentArchive, newArchivePath, existingEntries, report, start)
 	}
 
-	// Prepare Added archive for subsequent imports.
+	// Prepare Added archive for subsequent imports (unless disabled).
 	var addedDst *os.File
 	var addedArchivePath string
 	var addedEntries []*zipx.Entry
-	if !isInitial {
+	if !isInitial && !noAdded {
 		addedArchiveName := timestampName("Added", ts)
 		addedArchivePath = uniqueArchivePath(env.Archive, addedArchiveName)
 		addedDst, err = zipx.OpenOrCreate(addedArchivePath)
 		if err != nil {
 			return fmt.Errorf("cannot create added archive: %w", err)
+		}
+	}
+
+	// Preserve the current archive's valid state before modifying it.
+	// If the sync is interrupted, recoverArchive can use this to restore the
+	// archive to its pre-sync state without duplicating payloads.
+	if currentArchive != "" {
+		if err := preserveCurrentState(env, currentArchive); err != nil {
+			if addedDst != nil {
+				_ = addedDst.Close()
+				_ = os.Remove(addedArchivePath)
+			}
+			return fmt.Errorf("cannot preserve current archive state: %w", err)
 		}
 	}
 
@@ -190,12 +209,16 @@ func Sync(env *app.Env, args []string) error {
 			fmt.Printf("Skipping invalid archive: %s\n", filepath.Base(path))
 			continue
 		}
-		bar := newProgressBar(len(src.Entries), filepath.Base(path))
-		for i, e := range src.Entries {
-			bar.update(i)
+		var totalBytes int64
+		for _, e := range src.Entries {
+			totalBytes += int64(e.CompressedSize)
+		}
+		bar := newByteProgressBar(totalBytes, filepath.Base(path))
+		for _, e := range src.Entries {
 			report.FilesScanned++
 			if shouldSkip(env, e) {
 				report.SkippedFiles++
+				bar.add(int64(e.CompressedSize))
 				continue
 			}
 			key := app.NormalizeKey(e.Name)
@@ -204,10 +227,11 @@ func Sync(env *app.Env, args []string) error {
 				_, next, found := findVersion(existing, head.Name, e.CRC32, e.UncompressedSize)
 				if found {
 					report.SkippedFiles++
+					bar.add(int64(e.CompressedSize))
 					continue
 				}
 				e.Name = app.InsertVersionSuffix(head.Name, next)
-				written, err = zipx.CopyRawEntry(archiveDst, src.File, e)
+				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
 				if err != nil {
 					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
@@ -216,7 +240,7 @@ func Sync(env *app.Env, args []string) error {
 				}
 				report.ModifiedFiles++
 			} else {
-				written, err = zipx.CopyRawEntry(archiveDst, src.File, e)
+				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
 				if err != nil {
 					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
@@ -232,7 +256,7 @@ func Sync(env *app.Env, args []string) error {
 
 			// Copy the same entry to the Added archive only for subsequent imports.
 			if addedDst != nil {
-				added, err := zipx.CopyRawEntry(addedDst, src.File, e)
+				added, err := zipx.CopyRawEntry(addedDst, src.File, e, nil)
 				if err != nil {
 					env.Logf("warn", "cannot copy added entry %s: %v", e.Name, err)
 				} else {
@@ -726,6 +750,36 @@ func readArchiveCD(path string) ([]byte, *zipx.EOCD, error) {
 	return buf, eocd, nil
 }
 
+// preserveCurrentState records the current archive's EOCD/CD offsets and backs
+// up its central directory bytes. If a later sync step corrupts the archive,
+// recoverArchive can use this information to truncate back to the last known
+// good size and rewrite the original central directory.
+func preserveCurrentState(env *app.Env, archivePath string) error {
+	cdBytes, eocd, err := readArchiveCD(archivePath)
+	if err != nil {
+		return err
+	}
+	s := state.New(filepath.Base(archivePath), app.Version)
+	s.ArchiveEnd = eocd.Offset + zipx.EOCDSize
+	if eocd.HasZip64 {
+		s.ArchiveEnd = eocd.Offset + zipx.EOCDSize
+	}
+	s.Entries = int64(eocd.TotalEntries)
+	s.CDOffset = int64(eocd.CDOffset)
+	s.CDSize = int64(eocd.CDSize)
+	s.CDSha256 = state.CDHash(cdBytes)
+	s.EOCDOffset = eocd.Offset
+	s.LastSyncAt = time.Now().UTC().Format(time.RFC3339)
+
+	if err := state.SaveAtomic(env.StatePath, s); err != nil {
+		return err
+	}
+	if err := state.BackupCD(env.BackupCD, cdBytes); err != nil {
+		env.Logf("warn", "could not backup central directory: %v", err)
+	}
+	return nil
+}
+
 func humanSize(n int64) string {
 	const unit = 1024
 	if n < unit {
@@ -825,7 +879,7 @@ func recoverArchive(env *app.Env, archivePath string) error {
 			_ = dst.Close()
 			return err
 		}
-		_, err = zipx.CopyRawEntry(dst, src, e)
+		_, err = zipx.CopyRawEntry(dst, src, e, nil)
 		_ = src.Close()
 		if err != nil {
 			_ = dst.Close()
@@ -1087,7 +1141,7 @@ func Compact(env *app.Env, args []string) error {
 		return err
 	}
 	for _, e := range fr.Entries {
-		_, err := zipx.CopyRawEntry(dst, fr.File, e)
+		_, err := zipx.CopyRawEntry(dst, fr.File, e, nil)
 		if err != nil {
 			_ = dst.Close()
 			return err

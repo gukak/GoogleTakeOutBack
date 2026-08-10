@@ -292,8 +292,10 @@ func ReadLocalHeader(f *os.File, off int64) (*Entry, int64, error) {
 
 // CopyRawEntry copies the compressed payload from src to dst without
 // decompressing. It returns the destination entry with LocalHeaderOff filled in.
-func CopyRawEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
-	h, err := copyRawEntry(dst, src, e)
+// If progress is non-nil, it is called with the number of payload bytes written
+// after each chunk.
+func CopyRawEntry(dst *os.File, src *os.File, e *Entry, progress func(int64)) (*Entry, error) {
+	h, err := copyRawEntry(dst, src, e, progress)
 	if err == nil {
 		return h, nil
 	}
@@ -302,10 +304,10 @@ func CopyRawEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
 	// scan local file headers to locate the entry and copy from there. If that
 	// also fails, the caller is informed so it can skip the file instead of
 	// aborting the whole sync.
-	return scanAndCopyEntry(dst, src, e)
+	return scanAndCopyEntry(dst, src, e, progress)
 }
 
-func copyRawEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
+func copyRawEntry(dst *os.File, src *os.File, e *Entry, progress func(int64)) (*Entry, error) {
 	h, dataOff, err := ReadLocalHeader(src, int64(e.LocalHeaderOff))
 	if err != nil {
 		return nil, fmt.Errorf("read local header for %s: %w", e.Name, err)
@@ -334,20 +336,51 @@ func copyRawEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
 		return nil, err
 	}
 	n := int64(h.CompressedSize)
-	if _, err := io.CopyN(dst, src, n); err != nil {
+	if err := copyNWithProgress(dst, src, n, progress); err != nil {
 		return nil, err
 	}
 	return h, nil
 }
 
-func scanAndCopyEntry(dst *os.File, src *os.File, e *Entry) (*Entry, error) {
+func copyNWithProgress(dst io.Writer, src io.Reader, n int64, progress func(int64)) error {
+	if progress == nil {
+		_, err := io.CopyN(dst, src, n)
+		return err
+	}
+	buf := make([]byte, 256*1024)
+	var copied int64
+	for copied < n {
+		toRead := int64(len(buf))
+		if n-copied < toRead {
+			toRead = n - copied
+		}
+		nr, err := src.Read(buf[:toRead])
+		if nr > 0 {
+			nw, werr := dst.Write(buf[:nr])
+			if werr != nil {
+				return werr
+			}
+			copied += int64(nw)
+			progress(int64(nw))
+		}
+		if err != nil {
+			if err == io.EOF && copied == n {
+				return nil
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func scanAndCopyEntry(dst *os.File, src *os.File, e *Entry, progress func(int64)) (*Entry, error) {
 	entries, err := ScanLocalHeaders(src.Name())
 	if err != nil {
 		return nil, fmt.Errorf("scan local headers for %s: %w", e.Name, err)
 	}
 	for _, se := range entries {
 		if se.Name == e.Name {
-			return copyRawEntry(dst, src, se)
+			return copyRawEntry(dst, src, se, progress)
 		}
 	}
 	return nil, fmt.Errorf("entry %s not found by local header scan", e.Name)
