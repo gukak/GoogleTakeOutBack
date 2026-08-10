@@ -132,6 +132,11 @@ func Sync(env *app.Env, args []string) error {
 	newArchiveName := timestampName("Consolidated", ts)
 	newArchivePath := uniqueArchivePath(env.Archive, newArchiveName)
 
+	// Nothing to import: rotate the timestamp without copying every entry.
+	if len(incomingFiles) == 0 {
+		return finalizeEmptySync(env, currentArchive, newArchivePath, existingEntries, report, start)
+	}
+
 	newDst, err := zipx.OpenOrCreate(newArchivePath)
 	if err != nil {
 		return fmt.Errorf("cannot create new archive: %w", err)
@@ -675,6 +680,76 @@ func writeSummary(path string, env *app.Env, r *Report, start time.Time, archive
 		fmt.Fprintf(&b, "Added:   %s\n", addedPath)
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+// finalizeEmptySync rotates the timestamp of the current archive when no
+// incoming files need to be imported. It renames the existing archive in place
+// instead of copying every entry, which is much faster for large archives.
+func finalizeEmptySync(env *app.Env, currentArchive, newArchivePath string, existingEntries []*zipx.Entry, report *Report, start time.Time) error {
+	if currentArchive == "" {
+		// Initial sync with nothing to import.
+		report.Duration = time.Since(start)
+		printReport(env, report, start)
+		env.Log("info", "no archives to process and no existing archive")
+		return nil
+	}
+
+	fmt.Println("No new or modified files to append; rotating archive timestamp...")
+	if err := os.Rename(currentArchive, newArchivePath); err != nil {
+		return fmt.Errorf("rename archive: %w", err)
+	}
+
+	cdBytes, eocd, err := readArchiveCD(newArchivePath)
+	if err != nil {
+		return err
+	}
+
+	s := state.New(filepath.Base(newArchivePath), app.Version)
+	s.ArchiveEnd = eocd.Offset + zipx.EOCDSize
+	if eocd.HasZip64 {
+		s.ArchiveEnd = eocd.Offset + zipx.EOCDSize
+	}
+	s.Entries = int64(len(existingEntries))
+	s.CDOffset = int64(eocd.CDOffset)
+	s.CDSize = int64(eocd.CDSize)
+	s.CDSha256 = state.CDHash(cdBytes)
+	s.EOCDOffset = eocd.Offset
+	s.LastSyncAt = time.Now().UTC().Format(time.RFC3339)
+	s.LastSyncDurationS = time.Since(start).Seconds()
+	if err := state.SaveAtomic(env.StatePath, s); err != nil {
+		return err
+	}
+	if err := state.BackupCD(env.BackupCD, cdBytes); err != nil {
+		env.Logf("warn", "could not backup central directory: %v", err)
+	}
+
+	report.Duration = time.Since(start)
+	printReport(env, report, start)
+	env.Summary("Archive: %s", newArchivePath)
+
+	summaryPath := strings.TrimSuffix(newArchivePath, ".zip") + ".txt"
+	if err := writeSummary(summaryPath, env, report, start, newArchivePath, ""); err != nil {
+		env.Logf("warn", "could not write summary file: %v", err)
+	}
+	env.Logf("info", "sync completed in %s, archive=%s", report.Duration, newArchivePath)
+	return nil
+}
+
+func readArchiveCD(path string) ([]byte, *zipx.EOCD, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	eocd, err := zipx.FindEOCD(f)
+	if err != nil {
+		return nil, nil, err
+	}
+	buf := make([]byte, eocd.CDSize)
+	if _, err := f.ReadAt(buf, int64(eocd.CDOffset)); err != nil {
+		return nil, nil, err
+	}
+	return buf, eocd, nil
 }
 
 func humanSize(n int64) string {

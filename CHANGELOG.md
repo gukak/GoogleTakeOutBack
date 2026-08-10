@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.7] - 2026-08-07
+
+### Changed
+- `sync` with no incoming archives now rotates the consolidated archive
+  timestamp by renaming the existing archive instead of copying every entry.
+  This makes empty syncs essentially instantaneous and avoids unnecessary disk
+  I/O.
+
+### Fixed
+- `sync` no longer prints "Copying N existing entries..." when there is nothing
+  to import.
+
 ## [v0.4.6] - 2026-08-07
 
 ### Fixed

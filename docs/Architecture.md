@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.6** — the design described here is implemented and
+> Status: **Implemented v0.4.7** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -938,6 +938,8 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
+- **v0.4.7** — empty `sync` rotates archive by rename instead of copying all
+  entries.
 - **v0.4.6** — fixed `update` redirect handling; `update vX.Y.Z` supported.
 - **v0.4.5** — direct-to-Archive sync (no project temp directory), `--no-backup`,
   always-timestamped consolidated archive, per-archive summary `.txt`, version
