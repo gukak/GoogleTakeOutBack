@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.2] - 2026-08-10
+
+### Fixed
+- Progress bar no longer displays corrupted trailing characters (`%)` or `))`)
+  when an error occurs mid-sync; errors are now logged silently and summarized
+  at the end of the run.
+- Sync errors no longer interrupt the live progress output. A final summary now
+  reports the error count and points to the daily log file for full details.
+- Google Photos `.supplemental-metadata.json` sidecars that differ only by JSON
+  formatting (whitespace, key order) between Takeout exports are now detected
+  as duplicates and skipped instead of being added to the consolidated/Added
+  archives.
+
 ## [v0.5.1] - 2026-08-10
 
 ### Fixed

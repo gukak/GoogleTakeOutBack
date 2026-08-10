@@ -114,7 +114,13 @@ Added:   /path/to/Archive/Added-20260805-123045.123.zip
 - **New files**: entries that were not yet in the consolidated archive.
 - **Modified files**: entries whose path was already archived but whose CRC or
   size changed. They are stored as a new version (`name__v2.ext`, `name__v3.ext`).
-- **Skipped files**: entries that were already present with identical CRC and size.
+- **Skipped files**: entries that were already present with identical CRC and
+  size. Google Photos `.supplemental-metadata.json` sidecars are also skipped
+  when they are semantically identical, even if their raw bytes differ (for
+  example different whitespace or key ordering).
+- **Errors**: number of entries that could not be processed. Details are written
+  to `TakeOutBack/logs/YYYY-MM-DD.log` and the summary points to that file when
+  errors occur.
 - **Archive / Added**: paths to the new consolidated archive and, for subsequent
   imports, the archive containing only the files added in this run.
 

@@ -450,12 +450,16 @@ on its own, so the file body is **self-describing**.
    - For each valid incoming archive, render a per-archive byte-based progress
      bar and process every entry:
      - Skip unchanged entries (identical CRC and size).
+     - For Google Photos `.supplemental-metadata.json` sidecars, additionally
+       compare a canonical JSON representation so files that differ only by
+       formatting (whitespace/key order) are skipped as duplicates.
      - For new entries, append them at the end of the consolidated archive and,
        for subsequent imports when enabled, to the `Added` archive.
      - For modified entries, append the versioned name (`name__vN.ext`) at the
        end of the consolidated archive and, when enabled, to the `Added` archive.
    - Existing payloads are never read or rewritten; only their central-directory
-     records are reused.
+     records are reused. Metadata sidecars are decompressed and normalized only
+     for the duplicate-detection step.
 
 6. **Write central directory and switch**
    - Append a fresh central directory and EoCD at the end of the consolidated

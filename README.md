@@ -74,6 +74,14 @@ directory is written after them. If a run is interrupted by a power loss, drive
 removal, or a full disk, the existing archive stays valid and `verify archive`
 continues to work; a fresh sync can be started as soon as space is available.
 
+### Duplicate detection
+
+Files are identified by their normalized path, CRC32 and uncompressed size. In
+addition, Google Photos `.supplemental-metadata.json` sidecars are compared
+semantically: two metadata files that contain the same data but were serialized
+with different whitespace or key ordering are treated as the same file and are
+not added again.
+
 You can override the archive and backup directories from the command line:
 
 ```bash

@@ -3,8 +3,11 @@
 package engine
 
 import (
+	"archive/zip"
 	"bufio"
+	"bytes"
 	"compress/flate"
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -138,6 +141,18 @@ func Sync(env *app.Env, args []string) error {
 		existing = map[string]*zipx.Entry{}
 	}
 
+	// Build a canonical-JSON index of existing Google Photos metadata sidecars.
+	// Takeout sometimes re-encodes these small JSON files with different
+	// whitespace or key order, so byte/CRC comparison falsely treats them as
+	// modified. We compare them semantically instead.
+	var existingMetadataIdx map[string][]byte
+	if currentArchive != "" {
+		existingMetadataIdx, err = buildMetadataIndex(currentArchive)
+		if err != nil {
+			env.Logf("warn", "cannot build metadata index: %v", err)
+		}
+	}
+
 	isInitial := currentArchive == ""
 	ts := time.Now()
 	newArchiveName := timestampName("Consolidated", ts)
@@ -225,6 +240,17 @@ func Sync(env *app.Env, args []string) error {
 			var written *zipx.Entry
 			if head, ok := existing[key]; ok {
 				_, next, found := findVersion(existing, head.Name, e.CRC32, e.UncompressedSize)
+				if !found && existingMetadataIdx != nil && isMetadataJSON(e.Name) {
+					if canon, ok := existingMetadataIdx[e.Name]; ok {
+						incomingData, rerr := readZipEntry(path, e.Name)
+						if rerr == nil {
+							incomingCanon, rerr := canonicalJSON(incomingData)
+							if rerr == nil && bytes.Equal(incomingCanon, canon) {
+								found = true
+							}
+						}
+					}
+				}
 				if found {
 					report.SkippedFiles++
 					bar.add(int64(e.CompressedSize))
@@ -235,7 +261,6 @@ func Sync(env *app.Env, args []string) error {
 				if err != nil {
 					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
-					fmt.Printf("Error: cannot append %s: %v\n", e.Name, err)
 					continue
 				}
 				report.ModifiedFiles++
@@ -244,7 +269,6 @@ func Sync(env *app.Env, args []string) error {
 				if err != nil {
 					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
-					fmt.Printf("Error: cannot append %s: %v\n", e.Name, err)
 					continue
 				}
 				report.NewFiles++
@@ -651,6 +675,8 @@ func printReport(env *app.Env, r *Report, start time.Time) {
 	env.Summary("Duration         : %s", formatDuration(d))
 	if r.Errors > 0 {
 		env.Summary("Status           : Completed with errors")
+		logPath := filepath.Join(env.LogsDir, time.Now().UTC().Format("2006-01-02")+".log")
+		env.Summary("Details          : %d error(s) logged to %s", r.Errors, logPath)
 	} else {
 		env.Summary("Status           : OK")
 	}
@@ -670,6 +696,8 @@ func writeSummary(path string, env *app.Env, r *Report, start time.Time, archive
 	fmt.Fprintf(&b, "Duration         : %s\n", formatDuration(d))
 	if r.Errors > 0 {
 		fmt.Fprintln(&b, "Status           : Completed with errors")
+		logPath := filepath.Join(env.LogsDir, time.Now().UTC().Format("2006-01-02")+".log")
+		fmt.Fprintf(&b, "Details          : %d error(s) logged to %s\n", r.Errors, logPath)
 	} else {
 		fmt.Fprintln(&b, "Status           : OK")
 	}
@@ -1169,4 +1197,78 @@ func Compact(env *app.Env, args []string) error {
 	_ = os.Remove(env.BackupCD)
 	env.Summary("Compacted archive: %s -> %s", humanSize(st.Size()), humanSize(st2.Size()))
 	return nil
+}
+
+// isMetadataJSON reports whether name is a Google Photos supplemental-metadata
+// sidecar. These small JSON files are frequently re-encoded with different
+// formatting between Takeout exports, so we compare them semantically.
+func isMetadataJSON(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), ".supplemental-metadata.json")
+}
+
+// canonicalJSON parses JSON data and re-serializes it with sorted keys and
+// compact formatting. This yields a byte representation that is insensitive to
+// whitespace and key-order differences.
+func canonicalJSON(data []byte) ([]byte, error) {
+	var v interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
+}
+
+// buildMetadataIndex returns a map of metadata-sidecar names to their canonical
+// JSON bytes for every such entry in the given archive.
+func buildMetadataIndex(archivePath string) (map[string][]byte, error) {
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	idx := make(map[string][]byte)
+	for _, f := range zr.File {
+		if !isMetadataJSON(f.Name) {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			continue
+		}
+		canon, err := canonicalJSON(data)
+		if err != nil {
+			continue
+		}
+		idx[f.Name] = canon
+	}
+	return idx, nil
+}
+
+// readZipEntry reads and returns the uncompressed content of a single entry.
+func readZipEntry(zipPath, entryName string) ([]byte, error) {
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if f.Name != entryName {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+	return nil, fmt.Errorf("entry %s not found in %s", entryName, zipPath)
 }
