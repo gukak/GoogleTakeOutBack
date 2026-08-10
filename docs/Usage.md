@@ -79,7 +79,7 @@ which is still readable.
 After each sync you will see something like:
 
 ```
-TakeOutBack v0.4.7
+TakeOutBack v0.4.8
 Archives scanned : 4
 Files scanned    : 182345
 New files        : 523
@@ -187,9 +187,9 @@ backups and incoming files are never touched.
 To install a specific release instead of the latest one:
 
 ```bash
-./TakeOutBack.sh update --version v0.4.7
+./TakeOutBack.sh update --version v0.4.8
 # or equivalently:
-./TakeOutBack.sh update v0.4.7
+./TakeOutBack.sh update v0.4.8
 ```
 
 ### Clean / Reset

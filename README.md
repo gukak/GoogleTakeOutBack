@@ -32,7 +32,7 @@ Google Takeout ZIP exports into a single logical archive history.
 Run the following command in an **empty** directory:
 
 ```bash
-curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.7/install.sh | bash
+curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.8/install.sh | bash
 ```
 
 ### Install on Windows
@@ -40,7 +40,7 @@ curl -fsSL https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.7/i
 Run the following command in an **empty** directory in PowerShell:
 
 ```powershell
-irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.7/install.ps1 | iex
+irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.8/install.ps1 | iex
 ```
 
 > See [Installation.md](docs/Installation.md) for more options (force install,
@@ -99,7 +99,7 @@ When the run finishes, the usual summary is printed, including the paths to the
 new consolidated archive and, for subsequent imports, the added-only archive:
 
 ```
-TakeOutBack v0.4.7
+TakeOutBack v0.4.8
 Archives scanned : 2
 Files scanned    : 3365
 New files        : 142

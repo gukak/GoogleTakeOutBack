@@ -35,6 +35,11 @@ type Report struct {
 }
 
 // Sync runs the consolidation process.
+//
+// The implementation is append-only: existing payloads are never rewritten.
+// New and modified entries are appended at the end of the current consolidated
+// archive, then a fresh central directory is written after them. The archive is
+// finally renamed to a new timestamped name.
 func Sync(env *app.Env, args []string) error {
 	start := time.Now()
 	env.Logf("info", "starting sync, version=%s", app.Version)
@@ -132,16 +137,12 @@ func Sync(env *app.Env, args []string) error {
 	newArchiveName := timestampName("Consolidated", ts)
 	newArchivePath := uniqueArchivePath(env.Archive, newArchiveName)
 
-	// Nothing to import: rotate the timestamp without copying every entry.
+	// Nothing to import: rotate the timestamp without touching payloads.
 	if len(incomingFiles) == 0 {
 		return finalizeEmptySync(env, currentArchive, newArchivePath, existingEntries, report, start)
 	}
 
-	newDst, err := zipx.OpenOrCreate(newArchivePath)
-	if err != nil {
-		return fmt.Errorf("cannot create new archive: %w", err)
-	}
-
+	// Prepare Added archive for subsequent imports.
 	var addedDst *os.File
 	var addedArchivePath string
 	var addedEntries []*zipx.Entry
@@ -150,45 +151,35 @@ func Sync(env *app.Env, args []string) error {
 		addedArchivePath = uniqueArchivePath(env.Archive, addedArchiveName)
 		addedDst, err = zipx.OpenOrCreate(addedArchivePath)
 		if err != nil {
-			_ = newDst.Close()
-			_ = os.Remove(newArchivePath)
 			return fmt.Errorf("cannot create added archive: %w", err)
 		}
 	}
 
-	var allEntries []*zipx.Entry
-	allEntries = append(allEntries, existingEntries...)
-
-	// Copy existing entries into the new archive first.
+	// Open the consolidated archive for appending. For the initial import,
+	// create a fresh archive.
+	var archiveDst *os.File
 	if currentArchive != "" {
-		fmt.Printf("Copying %d existing entries into the new archive...\n", len(existingEntries))
-		oldFile, err := os.Open(currentArchive)
+		archiveDst, err = os.OpenFile(currentArchive, os.O_RDWR|os.O_APPEND, 0644)
 		if err != nil {
-			_ = newDst.Close()
-			_ = os.Remove(newArchivePath)
 			if addedDst != nil {
 				_ = addedDst.Close()
 				_ = os.Remove(addedArchivePath)
 			}
 			return fmt.Errorf("cannot open current archive: %w", err)
 		}
-		copyBar := newProgressBar(len(existingEntries), "existing entries")
-		for i, e := range existingEntries {
-			copyBar.update(i)
-			if _, err := zipx.CopyRawEntry(newDst, oldFile, e); err != nil {
-				_ = oldFile.Close()
-				_ = newDst.Close()
-				_ = os.Remove(newArchivePath)
-				if addedDst != nil {
-					_ = addedDst.Close()
-					_ = os.Remove(addedArchivePath)
-				}
-				return fmt.Errorf("cannot copy existing entry %s: %w", e.Name, err)
+	} else {
+		archiveDst, err = zipx.OpenOrCreate(newArchivePath)
+		if err != nil {
+			if addedDst != nil {
+				_ = addedDst.Close()
+				_ = os.Remove(addedArchivePath)
 			}
+			return fmt.Errorf("cannot create new archive: %w", err)
 		}
-		copyBar.finish()
-		_ = oldFile.Close()
 	}
+
+	allEntries := make([]*zipx.Entry, len(existingEntries))
+	copy(allEntries, existingEntries)
 
 	appended := false
 
@@ -216,7 +207,7 @@ func Sync(env *app.Env, args []string) error {
 					continue
 				}
 				e.Name = app.InsertVersionSuffix(head.Name, next)
-				written, err = zipx.CopyRawEntry(newDst, src.File, e)
+				written, err = zipx.CopyRawEntry(archiveDst, src.File, e)
 				if err != nil {
 					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
@@ -225,7 +216,7 @@ func Sync(env *app.Env, args []string) error {
 				}
 				report.ModifiedFiles++
 			} else {
-				written, err = zipx.CopyRawEntry(newDst, src.File, e)
+				written, err = zipx.CopyRawEntry(archiveDst, src.File, e)
 				if err != nil {
 					report.Errors++
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
@@ -254,59 +245,72 @@ func Sync(env *app.Env, args []string) error {
 		_ = src.Close()
 	}
 
+	if !appended {
+		_ = archiveDst.Close()
+		if addedDst != nil {
+			_ = addedDst.Close()
+			_ = os.Remove(addedArchivePath)
+		}
+		if currentArchive != "" {
+			return finalizeEmptySync(env, currentArchive, newArchivePath, existingEntries, report, start)
+		}
+		_ = os.Remove(newArchivePath)
+		report.Duration = time.Since(start)
+		printReport(env, report, start)
+		return nil
+	}
+
 	sort.SliceStable(allEntries, func(i, j int) bool {
 		return allEntries[i].LocalHeaderOff < allEntries[j].LocalHeaderOff
 	})
 
-	// Write the new consolidated archive.
-	eocd, err := zipx.WriteCentralDir(newDst, allEntries)
+	// Append the new central directory at the end of the consolidated archive.
+	eocd, err := zipx.WriteCentralDir(archiveDst, allEntries)
 	if err != nil {
-		_ = newDst.Close()
-		_ = os.Remove(newArchivePath)
+		_ = archiveDst.Close()
 		if addedDst != nil {
 			_ = addedDst.Close()
 			_ = os.Remove(addedArchivePath)
 		}
 		return fmt.Errorf("write central directory: %w", err)
 	}
-	if err := newDst.Sync(); err != nil {
-		_ = newDst.Close()
-		_ = os.Remove(newArchivePath)
+	if err := archiveDst.Sync(); err != nil {
+		_ = archiveDst.Close()
 		if addedDst != nil {
 			_ = addedDst.Close()
 			_ = os.Remove(addedArchivePath)
 		}
 		return err
 	}
-	if err := newDst.Close(); err != nil {
-		_ = os.Remove(newArchivePath)
+	if err := archiveDst.Close(); err != nil {
 		if addedDst != nil {
+			_ = addedDst.Close()
 			_ = os.Remove(addedArchivePath)
 		}
 		return err
+	}
+
+	// Rename the modified archive to its final timestamped name.
+	if currentArchive != "" && currentArchive != newArchivePath {
+		if err := os.Rename(currentArchive, newArchivePath); err != nil {
+			if addedDst != nil {
+				_ = addedDst.Close()
+				_ = os.Remove(addedArchivePath)
+			}
+			return fmt.Errorf("rename archive: %w", err)
+		}
 	}
 
 	// Write the Added archive only for subsequent imports when something changed.
 	if addedDst != nil {
-		if appended {
-			if err := writeAddedArchive(addedDst, addedEntries); err != nil {
-				_ = os.Remove(newArchivePath)
-				_ = os.Remove(addedArchivePath)
-				return fmt.Errorf("write added archive: %w", err)
-			}
-		} else {
-			_ = addedDst.Close()
+		if err := writeAddedArchive(addedDst, addedEntries); err != nil {
+			_ = os.Remove(newArchivePath)
 			_ = os.Remove(addedArchivePath)
-			addedArchivePath = ""
+			return fmt.Errorf("write added archive: %w", err)
 		}
 	}
 
-	// The old consolidated archive is now superseded; remove it.
-	if currentArchive != "" && currentArchive != newArchivePath {
-		_ = os.Remove(currentArchive)
-	}
-
-	cdBytes, err := readTailCD(newArchivePath, eocd)
+	cdBytes, eocd, err := readArchiveCD(newArchivePath)
 	if err != nil {
 		return err
 	}
@@ -445,23 +449,6 @@ func listBackups(dir string) ([]string, error) {
 	return files, nil
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
-}
-
 func rotateBackups(dir string, keep int) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -548,19 +535,6 @@ func findVersion(existing map[string]*zipx.Entry, plainName string, crc uint32, 
 		break
 	}
 	return nil, next, false
-}
-
-func readTailCD(archivePath string, eocd *zipx.EOCD) ([]byte, error) {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	buf := make([]byte, eocd.CDSize)
-	if _, err := f.ReadAt(buf, int64(eocd.CDOffset)); err != nil {
-		return nil, err
-	}
-	return buf, nil
 }
 
 func acquireLock(path string) (*os.File, error) {

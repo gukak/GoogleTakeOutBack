@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.7** — the design described here is implemented and
+> Status: **Implemented v0.4.8** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -98,10 +98,11 @@ are ever required on the host.**
 ### 3.2 Storage model — **timestamped consolidated ZIP archives**
 
 **Decision**: The complete historical collection lives in a single *current*
-ZIP file named `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`. On every sync a
-brand-new consolidated archive is written directly into `Archive/` with a fresh
-timestamped name; once complete, the previous consolidated archive is removed
-from `Archive/` (a copy already lives in `Backup/`). A companion
+ZIP file named `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`. On every sync the
+current archive is opened for append: new and modified entries are written at
+the end, followed by a fresh central directory. Once complete, the archive is
+renamed to a new timestamped name and the previous name is removed from
+`Archive/` (a copy already lives in `Backup/`). A companion
 `Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` contains only the entries imported during
 that sync. A same-named `.txt` file records the run summary.
 
@@ -437,27 +438,29 @@ on its own, so the file body is **self-describing**.
    - Load `IndexExisting` = `path → entry` from the current consolidated archive's
      central directory (fast: parse CD only). Print the number of loaded entries.
 
-5. **Build new archives**
-   - Create the new consolidated archive directly in `Archive/` with a fresh
-     timestamped name. For subsequent imports, also create an `Added-*.zip` in
-     `Archive/`. For the initial import, no Added archive is produced.
-   - Copy all existing entries from the current archive into the new consolidated
-     archive. Show an entry-based progress bar during this copy.
+5. **Append new entries**
+   - Open the current consolidated archive for append (`O_APPEND`). For the
+     initial import, create a fresh archive in `Archive/`.
+   - For subsequent imports, also create an `Added-*.zip` in `Archive/`. For the
+     initial import, no Added archive is produced.
    - For each valid incoming archive, render a per-archive progress bar and
      process every entry:
      - Skip unchanged entries (identical CRC and size).
-     - For new entries, write them to the new consolidated archive and, for
-       subsequent imports, to the `Added` archive.
-     - For modified entries, write the versioned name (`name__vN.ext`) to the
-       new consolidated archive and, for subsequent imports, to the `Added`
-       archive.
-   - Write the central directory and EoCD to the consolidated archive and, when
-     applicable, to the Added archive.
+     - For new entries, append them at the end of the consolidated archive and,
+       for subsequent imports, to the `Added` archive.
+     - For modified entries, append the versioned name (`name__vN.ext`) at the
+       end of the consolidated archive and, for subsequent imports, to the
+       `Added` archive.
+   - Existing payloads are never read or rewritten; only their central-directory
+     records are reused.
 
-6. **Switch**
-   - `fsync` and close the new archives.
-   - Remove the previous consolidated archive from `Archive/` (it is already in
-     `Backup/` if backup was enabled).
+6. **Write central directory and switch**
+   - Append a fresh central directory and EoCD at the end of the consolidated
+     archive. `fsync` and close.
+   - Rename the modified archive to its final timestamped name and remove the
+     previous name from `Archive/` (it is already in `Backup/` if backup was
+     enabled).
+   - Write the central directory and EoCD to the `Added` archive when applicable.
 
 7. **Finalize state and cleanup**
    - Write `Archive/state.json` and `Archive/cd.bak` atomically.
@@ -469,14 +472,12 @@ on its own, so the file body is **self-describing**.
 
 ### 6.3 Worst-case complexity
 
-- Per sync: O(E_in) incoming entries to classify + O(E_total) entry copies +
+- Per sync: O(E_in) incoming entries to classify + O(E_added) payloads to append +
   O(E_total) to write the new consolidated CD + O(E_added) to write the Added CD.
-- Because the archive is fully rewritten each sync, the CD rewrite cost is
-  O(E_total) bytes. For 10^6 historical entries, the CD is ~ 100–200 MB — easily
-  written in a few seconds on USB 3 + SSD.
-- Payload cost = all existing payloads + NEW/MOD payloads. This trades raw write
-  throughput for crash safety and simplicity: the previous archive is never
-  modified in place.
+- Existing payloads are **not** rewritten. Incremental syncs therefore cost
+  roughly the size of the new data plus the size of the central directory.
+- Because old central directories are left in place, the archive grows slightly
+  after each sync. `--compact` rewrites the archive to remove those dead blocks.
 - No full decompression is performed; payloads are copied raw byte-for-byte.
 
 ---
@@ -503,12 +504,12 @@ because the archive is rebuilt from scratch on every sync.
 
 - The previous consolidated archive is **copied to `Backup/`** before any write
   begins, so it is always recoverable.
-- The new consolidated archive is written directly into `Archive/` with a fresh
-  timestamped name. The old archive is never opened for writing.
-- At any instant of failure, the previous consolidated archive remains intact
-  (and a copy exists in `Backup/` unless `--no-backup` was used).
-- The scanner only looks at `Consolidated-*.zip` files, so an incomplete new file
-  will be ignored if a previous valid archive still exists.
+- New entries are appended at the end of the current archive and a fresh central
+  directory is written after them. Existing payloads are never rewritten.
+- At any instant of failure, the previous consolidated archive (or a backup copy)
+  remains intact.
+- The scanner reads the latest central directory via the EoCD, so an incomplete
+  append is ignored and recovery scans local headers to rebuild a valid CD.
 - The two sidecars (`state.json` + `cd.bak`) are tiny and renamed atomically
   (Windows-safe rename-in-same-dir). Their loss degrades only performance
   (startup may need a full LFH scan), not correctness.
@@ -525,8 +526,8 @@ because the archive is rebuilt from scratch on every sync.
 
 ### 7.4 Compaction (`--compact`, opt-in)
 
-Because the consolidated archive is already rebuilt from scratch on every sync,
-`--compact` is rarely needed. It is kept as a manual repair tool:
+`--compact` rewrites the archive to remove dead central-directory blocks that
+accumulate after each append-only sync. It is also kept as a manual repair tool:
 
 - Snapshot the current valid CD in memory.
 - Stream-copy all referenced payloads (raw bytes) into a system temp file.
@@ -627,17 +628,18 @@ Power-failure / force-quit / USB-yank / Ctrl+C modes covered:
 
 | Crash point | Result on next run |
 |---|---|
-| Before new archive is created | Old archive untouched; nothing to do. |
-| While copying existing entries | New archive is incomplete; scanner ignores it. Old archive remains current. |
-| While adding new entries | New archive is incomplete; scanner ignores it. Old archive remains current. |
-| During removal of old archive | New archive is already complete and valid; scanner picks it. |
-| After old archive removal, before sidecar update | File is consistent; we derive the sidecar from the trailing CD. |
+| Before any write | Old archive untouched; nothing to do. |
+| While appending new entries | Current archive has extra partial data after the last good CD; scanner uses the last valid CD and ignores the partial append. |
+| While writing the new central directory | Current archive has new payloads but an incomplete CD; recovery scans local headers to rebuild the CD. |
+| During rename to timestamped name | New name already points to a complete and valid archive; scanner picks it. |
+| After rename, before sidecar update | File is consistent; we derive the sidecar from the trailing CD. |
 | Mid-sidecar write (rename aborts) | The atomic rename means EITHER old OR new sidecar exists; never a partial file. |
 | Lockfile left behind | Detected as stale if the recorded PID is dead; removed automatically. |
 
 **No corruption ever survives**: the worst case is "the previous run is wasted
-and must be rerun". The invariant is **we never modify the current consolidated
-archive in place**, so it is always available as a rollback point.
+and must be rerun". The current archive is opened for append only after a backup
+has been created, and recovery can always rebuild the central directory from the
+local file headers.
 
 ### 9.1 Optional `.bak.shield` strategy
 
@@ -938,6 +940,8 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
+- **v0.4.8** — true append-only sync: existing payloads are never rewritten,
+  only the central directory is updated.
 - **v0.4.7** — empty `sync` rotates archive by rename instead of copying all
   entries.
 - **v0.4.6** — fixed `update` redirect handling; `update vX.Y.Z` supported.

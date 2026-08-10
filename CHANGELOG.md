@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.8] - 2026-08-07
+
+### Changed
+- `sync` is now truly append-only. Existing payloads are no longer copied when
+  new or modified files are imported; they are only read through the central
+  directory for identity checks. New and modified entries are appended at the
+  end of the current consolidated archive and a fresh central directory is
+  written after them. This dramatically reduces I/O and duration for
+  incremental imports.
+- Removed the now-unused `Copying existing entries...` progress bar from normal
+  syncs (it only applies to repair/compactions).
+
 ## [v0.4.7] - 2026-08-07
 
 ### Changed
