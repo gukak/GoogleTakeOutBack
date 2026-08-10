@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the current takeoutback version. It is overridden at build time.
-const Version = "v0.4.8"
+const Version = "v0.4.9"
 
 // OwnerRepo is the GitHub owner/repository used by the installer and updater.
 // Change this to the real repository before the first release.
@@ -30,6 +30,7 @@ const (
 	ToolsDir      = "tools"
 	ConfigDir     = "config"
 	LogsDir       = "logs"
+	TempDir       = "temp"
 	ScriptsDir    = "scripts"
 	DocsDir       = "docs"
 
@@ -90,6 +91,7 @@ type EnvOptions struct {
 	Root       string
 	ArchiveDir string
 	BackupDir  string
+	TempDir    string
 }
 
 // Env holds the resolved project layout and runtime services.
@@ -106,6 +108,7 @@ type Env struct {
 	ToolsWin   string
 	ConfigDir  string
 	LogsDir    string
+	TempDir    string
 	Settings   Settings
 	Policy     Policy
 
@@ -145,9 +148,16 @@ func NewEnv(opts EnvOptions) (*Env, error) {
 	e.ToolsWin = filepath.Join(e.AppRoot, ToolsDir, "windows", WindowsBinaryName)
 	e.ConfigDir = filepath.Join(e.AppRoot, ConfigDir)
 	e.LogsDir = filepath.Join(e.AppRoot, LogsDir)
+	if opts.TempDir != "" {
+		if e.TempDir, err = filepath.Abs(opts.TempDir); err != nil {
+			return nil, fmt.Errorf("cannot resolve temp directory %q: %w", opts.TempDir, err)
+		}
+	} else {
+		e.TempDir = filepath.Join(e.AppRoot, TempDir)
+	}
 	e.logStart = time.Now()
 
-	if err := ensureLayout(root, e.Archive, e.Backup); err != nil {
+	if err := ensureLayout(root, e.Archive, e.Backup, e.TempDir); err != nil {
 		return nil, err
 	}
 	if err := e.loadSettings(); err != nil {
@@ -250,7 +260,7 @@ func hasRootMarkers(d string) bool {
 	return true
 }
 
-func ensureLayout(root, archiveDir, backupDir string) error {
+func ensureLayout(root, archiveDir, backupDir, tempDir string) error {
 	dirs := []string{
 		filepath.Join(root, IncomingDir),
 		archiveDir,
@@ -260,6 +270,7 @@ func ensureLayout(root, archiveDir, backupDir string) error {
 		filepath.Join(root, AppDir, ToolsDir, "windows"),
 		filepath.Join(root, AppDir, ConfigDir),
 		filepath.Join(root, AppDir, LogsDir),
+		tempDir,
 		filepath.Join(root, AppDir, ScriptsDir),
 		filepath.Join(root, AppDir, DocsDir),
 	}
@@ -336,12 +347,14 @@ func (e *Env) openLog() error {
 	return nil
 }
 
-// BinaryName returns the platform-specific binary name.
+// BinaryName returns the release asset name for the current platform.
+// It matches the names produced by the release workflow (takeoutback-linux-amd64
+// and takeoutback-windows-amd64.exe), not the local binary names.
 func BinaryName() string {
 	if runtime.GOOS == "windows" {
-		return WindowsBinaryName
+		return "takeoutback-windows-amd64.exe"
 	}
-	return LinuxBinaryName
+	return "takeoutback-linux-amd64"
 }
 
 // BinaryPath returns the local path to the current platform's binary.

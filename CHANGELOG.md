@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.9] - 2026-08-07
+
+### Fixed
+- `update` now downloads the correct release asset name (`takeoutback-linux-amd64`
+  / `takeoutback-windows-amd64.exe`) instead of the local binary name, fixing the
+  HTTP 404 on Windows.
+
+### Changed
+- Temporary directories used by recovery and compaction are now created inside
+  `TakeOutBack/temp/` instead of the system temp directory. `TakeOutBack/temp/`
+  is created by the installer and remains ignored by Git.
+
 ## [v0.4.8] - 2026-08-07
 
 ### Changed

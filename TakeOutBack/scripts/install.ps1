@@ -8,7 +8,7 @@ param(
     [switch]$NoBoth
 )
 
-if (-not $Version) { $Version = "v0.4.8" }
+if (-not $Version) { $Version = "v0.4.9" }
 $OwnerRepo = "gukak/GoogleTakeOutBack"
 $FetchBoth = if ($NoBoth) { $false } else { $true }
 
@@ -30,6 +30,7 @@ $dirs = @(
     "TakeOutBack/app",
     "TakeOutBack/tools/linux",
     "TakeOutBack/tools/windows",
+    "TakeOutBack/temp",
     "TakeOutBack/logs",
     "TakeOutBack/config",
     "TakeOutBack/scripts",

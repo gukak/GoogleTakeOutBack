@@ -808,7 +808,7 @@ func recoverArchive(env *app.Env, archivePath string) error {
 		return os.Truncate(archivePath, 0)
 	}
 
-	tempDir, err := os.MkdirTemp("", "takeoutback-recover-*")
+	tempDir, err := os.MkdirTemp(env.TempDir, "recover-*")
 	if err != nil {
 		return err
 	}
@@ -1069,7 +1069,7 @@ func Compact(env *app.Env, args []string) error {
 		return nil
 	}
 
-	runDir, err := os.MkdirTemp("", "takeoutback-compact-*")
+	runDir, err := os.MkdirTemp(env.TempDir, "compact-*")
 	if err != nil {
 		return fmt.Errorf("cannot create temp directory: %w", err)
 	}

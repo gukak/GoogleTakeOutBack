@@ -1,6 +1,6 @@
 # TakeOutBack — Architecture Document
 
-> Status: **Implemented v0.4.8** — the design described here is implemented and
+> Status: **Implemented v0.4.9** — the design described here is implemented and
 > released. This document is updated to reflect the current behavior.
 
 ---
@@ -409,9 +409,9 @@ on its own, so the file body is **self-describing**.
 
 1. **Startup**
    - Resolve project root; verify `Incoming/`, `Archive/`, `Backup/`,
-     `TakeOutBack/{tools,config,logs}` exist; create missing.
-     Optional `--archive-dir PATH` and `--backup-dir PATH` override the default
-     `Archive` and `Backup` directories.
+     `TakeOutBack/{tools,config,logs,temp}` exist; create missing.
+     Optional `--archive-dir PATH`, `--backup-dir PATH` and `--temp-dir PATH`
+     override the default `Archive`, `Backup` and `TakeOutBack/temp` directories.
    - Determine the current consolidated archive by scanning the configured
      archive directory for the lexicographically greatest `Consolidated-*.zip`
      name (timestamp format is sortable; timestamps are in local time).
@@ -940,6 +940,8 @@ released code:
   `Consolidated.zip` (if present), reports a *plan* (what would be NEW/MOD/SKIP).
 - **v0.3.0** — Full append-only sync + sidecar + recovery + logs. First usable
   release.
+- **v0.4.9** — fixed `update` asset name on Windows; temp work moved back into
+  `TakeOutBack/temp/`.
 - **v0.4.8** — true append-only sync: existing payloads are never rewritten,
   only the central directory is updated.
 - **v0.4.7** — empty `sync` rotates archive by rename instead of copying all

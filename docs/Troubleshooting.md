@@ -99,7 +99,7 @@ backslash escaped the closing quote. It is fixed in v0.3.6 and later. Reinstall
 with the latest installer:
 
 ```powershell
-irm https://github.com/OWNER/REPO/releases/download/v0.4.8/install.ps1 | iex
+irm https://github.com/OWNER/REPO/releases/download/v0.4.9/install.ps1 | iex
 ```
 
 ### Stale lock after a crash or Ctrl+C
@@ -116,7 +116,7 @@ rm Archive/.consolidated.lock
 
 ### Interrupted sync left partial files
 
-Since v0.4.8, TakeOutBack writes the new consolidated archive directly into
+Since v0.4.9, TakeOutBack writes the new consolidated archive directly into
 `Archive/`. If a sync is interrupted, the latest `Consolidated-*.zip` may be
 partial. The previous archive is safely stored in `Backup/`, so you can restore
 from there if needed.

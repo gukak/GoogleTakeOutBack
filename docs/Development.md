@@ -81,9 +81,9 @@ make build-all
 3. Update documentation (`README.md`, `docs/*.md`) and the installer scripts
    (`TakeOutBack/scripts/install.sh`, `TakeOutBack/scripts/install.ps1`) to
    reference the new version.
-4. Commit with a conventional commit message, e.g. `feat: release v0.4.8`.
-5. Tag: `git tag -a v0.4.8 -m "Release v0.4.8"`
-6. Push the tag: `git push origin v0.4.8`
+4. Commit with a conventional commit message, e.g. `feat: release v0.4.9`.
+5. Tag: `git tag -a v0.4.9 -m "Release v0.4.9"`
+6. Push the tag: `git push origin v0.4.9`
 7. The GitHub Actions `release.yml` workflow builds binaries, generates
    checksums, creates a GitHub Release and uploads the assets.
 
