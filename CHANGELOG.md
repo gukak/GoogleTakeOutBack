@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.4] - 2026-08-11
+
+### Fixed
+- Google Photos metadata sidecars whose filenames were truncated by Takeout
+  (ending in plain `.json` instead of `.supplemental-metadata.json`) are now
+  detected by inspecting the JSON content. They are deduplicated against existing
+  sidecars using a canonical-content hash, preventing the same metadata from
+  being added again under a different (longer/shorter) name.
+
 ## [v0.5.3] - 2026-08-11
 
 ### Fixed

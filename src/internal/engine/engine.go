@@ -7,6 +7,8 @@ import (
 	"bufio"
 	"bytes"
 	"compress/flate"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
@@ -145,10 +147,12 @@ func Sync(env *app.Env, args []string) error {
 	// Build a canonical-JSON index of existing Google Photos metadata sidecars.
 	// Takeout sometimes re-encodes these small JSON files with different
 	// whitespace or key order, so byte/CRC comparison falsely treats them as
-	// modified. We compare them semantically instead.
+	// modified. We compare them semantically. Some Takeout exports also truncate
+	// long sidecar names, so we additionally deduplicate by content hash.
 	var existingMetadataIdx map[string][]byte
+	var existingMetadataSet map[string]struct{}
 	if currentArchive != "" {
-		existingMetadataIdx, err = buildMetadataIndex(currentArchive)
+		existingMetadataIdx, existingMetadataSet, err = buildMetadataIndex(currentArchive)
 		if err != nil {
 			env.Logf("warn", "cannot build metadata index: %v", err)
 		}
@@ -242,13 +246,19 @@ func Sync(env *app.Env, args []string) error {
 			var written *zipx.Entry
 			if head, ok := existing[key]; ok {
 				_, next, found := findVersion(existing, head.Name, e.CRC32, e.UncompressedSize)
-				if !found && existingMetadataIdx != nil && isMetadataJSON(e.Name) {
-					if canon, ok := existingMetadataIdx[e.Name]; ok {
-						incomingData, rerr := readZipEntry(path, e.Name)
+				if !found && existingMetadataSet != nil && (isMetadataJSON(e.Name) || isJSONCandidate(e.Name)) {
+					incomingData, rerr := readZipEntry(path, e.Name)
+					if rerr == nil && looksLikeMetadataJSON(incomingData) {
+						incomingCanon, rerr := canonicalJSON(incomingData)
 						if rerr == nil {
-							incomingCanon, rerr := canonicalJSON(incomingData)
-							if rerr == nil && bytes.Equal(incomingCanon, canon) {
+							incomingHash := metadataHash(incomingCanon)
+							if _, ok := existingMetadataSet[incomingHash]; ok {
 								found = true
+							} else if canon, ok := existingMetadataIdx[e.Name]; ok && bytes.Equal(incomingCanon, canon) {
+								found = true
+							}
+							if found {
+								existingMetadataSet[incomingHash] = struct{}{}
 							}
 						}
 					}
@@ -274,6 +284,24 @@ func Sync(env *app.Env, args []string) error {
 				}
 				report.ModifiedFiles++
 			} else {
+				// Content-based dedup for metadata JSONs whose names changed between
+				// Takeout exports (e.g. truncated sidecar names).
+				if existingMetadataSet != nil && (isMetadataJSON(e.Name) || isJSONCandidate(e.Name)) {
+					incomingData, rerr := readZipEntry(path, e.Name)
+					if rerr == nil && looksLikeMetadataJSON(incomingData) {
+						incomingCanon, rerr := canonicalJSON(incomingData)
+						if rerr == nil {
+							incomingHash := metadataHash(incomingCanon)
+							if _, ok := existingMetadataSet[incomingHash]; ok {
+								report.SkippedFiles++
+								env.Logf("info", "SKIP canonical metadata (renamed): %s (crc=%08x size=%d)", e.Name, e.CRC32, e.UncompressedSize)
+								existingMetadataSet[incomingHash] = struct{}{}
+								bar.add(int64(e.CompressedSize))
+								continue
+							}
+						}
+					}
+				}
 				env.Logf("info", "NEW: %s (crc=%08x size=%d)", e.Name, e.CRC32, e.UncompressedSize)
 				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
 				if err != nil {
@@ -288,6 +316,19 @@ func Sync(env *app.Env, args []string) error {
 			allEntries = append(allEntries, written)
 			existing[app.NormalizeKey(written.Name)] = written
 			appended = true
+
+			// Keep the metadata index up to date so later entries in the same sync
+			// can be deduplicated by content hash even if their names differ.
+			if existingMetadataIdx != nil && (isMetadataJSON(written.Name) || isJSONCandidate(written.Name)) {
+				if data, rerr := readZipEntry(path, e.Name); rerr == nil {
+					if looksLikeMetadataJSON(data) {
+						if canon, rerr := canonicalJSON(data); rerr == nil {
+							existingMetadataIdx[written.Name] = canon
+							existingMetadataSet[metadataHash(canon)] = struct{}{}
+						}
+					}
+				}
+			}
 
 			// Copy the same entry to the Added archive only for subsequent imports.
 			if addedDst != nil {
@@ -1222,6 +1263,29 @@ func isMetadataJSON(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".supplemental-metadata.json")
 }
 
+// isJSONCandidate reports whether a file might be a JSON sidecar that Takeout
+// truncated to just ".json" when the full name exceeded the archive's limits.
+func isJSONCandidate(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), ".json")
+}
+
+// looksLikeMetadataJSON inspects JSON content for the characteristic fields of a
+// Google Photos supplemental-metadata sidecar.
+func looksLikeMetadataJSON(data []byte) bool {
+	var v map[string]interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return false
+	}
+	_, hasTitle := v["title"]
+	_, hasCreationTime := v["creationTime"]
+	_, hasPhotoTakenTime := v["photoTakenTime"]
+	_, hasGeoData := v["geoData"]
+	_, hasGeoDataExif := v["geoDataExif"]
+	_, hasURL := v["url"]
+	_, hasGooglePhotosOrigin := v["googlePhotosOrigin"]
+	return hasTitle && (hasCreationTime || hasPhotoTakenTime || hasGeoData || hasGeoDataExif || hasURL || hasGooglePhotosOrigin)
+}
+
 // canonicalJSON parses JSON data and re-serializes it with sorted keys and
 // compact formatting. This yields a byte representation that is insensitive to
 // whitespace and key-order differences.
@@ -1234,16 +1298,19 @@ func canonicalJSON(data []byte) ([]byte, error) {
 }
 
 // buildMetadataIndex returns a map of metadata-sidecar names to their canonical
-// JSON bytes for every such entry in the given archive.
-func buildMetadataIndex(archivePath string) (map[string][]byte, error) {
+// JSON bytes and a set of canonical-content hashes for every such entry in the
+// given archive. The content-hash set allows deduplication even when Takeout
+// truncates or otherwise changes the sidecar file name between exports.
+func buildMetadataIndex(archivePath string) (map[string][]byte, map[string]struct{}, error) {
 	zr, err := zip.OpenReader(archivePath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer zr.Close()
 	idx := make(map[string][]byte)
+	set := make(map[string]struct{})
 	for _, f := range zr.File {
-		if !isMetadataJSON(f.Name) {
+		if !isMetadataJSON(f.Name) && !isJSONCandidate(f.Name) {
 			continue
 		}
 		rc, err := f.Open()
@@ -1255,13 +1322,25 @@ func buildMetadataIndex(archivePath string) (map[string][]byte, error) {
 		if err != nil {
 			continue
 		}
+		// Only index files that are really Google Photos metadata sidecars.
+		// Some exports truncate the suffix to ".json", so we also inspect content.
+		if !isMetadataJSON(f.Name) && !looksLikeMetadataJSON(data) {
+			continue
+		}
 		canon, err := canonicalJSON(data)
 		if err != nil {
 			continue
 		}
 		idx[f.Name] = canon
+		set[metadataHash(canon)] = struct{}{}
 	}
-	return idx, nil
+	return idx, set, nil
+}
+
+// metadataHash returns a compact string hash of canonical JSON bytes.
+func metadataHash(canon []byte) string {
+	sum := sha256.Sum256(canon)
+	return hex.EncodeToString(sum[:])
 }
 
 // readZipEntry reads and returns the uncompressed content of a single entry.
