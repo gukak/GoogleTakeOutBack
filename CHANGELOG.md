@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.3] - 2026-08-11
+
+### Fixed
+- Windows staged updates now apply automatically on the next startup. When the
+  running `takeoutback.exe` cannot be overwritten, the updater writes a
+  `takeoutback.exe.next` file; the binary detects it at launch, renames the old
+  binary, promotes `.next` to the current binary, and continues.
+- Progress bar no longer leaves trailing characters (`%)` / `)`) when the line
+  length shrinks (e.g. when the displayed unit changes during the copy). Each
+  redraw is padded with spaces to clear the previous line.
+
+### Changed
+- Per-entry logging now records why a file is added or skipped:
+  - `NEW`, `MODIFIED`, `MODIFIED metadata`, `SKIP identical`, `SKIP canonical metadata`,
+    `SKIP policy`.
+- Real import errors are now collected in `Report.ErrorDetails` and written to
+  the `Archive/Consolidated-*.txt` summary file, in addition to being logged to
+  `TakeOutBack/logs/YYYY-MM-DD.log`.
+
 ## [v0.5.2] - 2026-08-10
 
 ### Fixed

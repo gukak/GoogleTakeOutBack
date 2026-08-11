@@ -35,6 +35,7 @@ type Report struct {
 	Errors          int
 	BytesAppended   int64
 	Duration        time.Duration
+	ErrorDetails    []string
 }
 
 // Sync runs the consolidation process.
@@ -233,6 +234,7 @@ func Sync(env *app.Env, args []string) error {
 			report.FilesScanned++
 			if shouldSkip(env, e) {
 				report.SkippedFiles++
+				env.Logf("info", "SKIP policy: %s", e.Name)
 				bar.add(int64(e.CompressedSize))
 				continue
 			}
@@ -253,21 +255,30 @@ func Sync(env *app.Env, args []string) error {
 				}
 				if found {
 					report.SkippedFiles++
+					env.Logf("info", "SKIP identical: %s (crc=%08x size=%d)", e.Name, e.CRC32, e.UncompressedSize)
 					bar.add(int64(e.CompressedSize))
 					continue
+				}
+				if isMetadataJSON(e.Name) && existingMetadataIdx != nil {
+					env.Logf("info", "MODIFIED metadata: %s existing(crc=%08x size=%d) incoming(crc=%08x size=%d)", head.Name, head.CRC32, head.UncompressedSize, e.CRC32, e.UncompressedSize)
+				} else {
+					env.Logf("info", "MODIFIED: %s existing(crc=%08x size=%d) incoming(crc=%08x size=%d)", head.Name, head.CRC32, head.UncompressedSize, e.CRC32, e.UncompressedSize)
 				}
 				e.Name = app.InsertVersionSuffix(head.Name, next)
 				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
 				if err != nil {
 					report.Errors++
+					report.ErrorDetails = append(report.ErrorDetails, fmt.Sprintf("%s: %v", e.Name, err))
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
 					continue
 				}
 				report.ModifiedFiles++
 			} else {
+				env.Logf("info", "NEW: %s (crc=%08x size=%d)", e.Name, e.CRC32, e.UncompressedSize)
 				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
 				if err != nil {
 					report.Errors++
+					report.ErrorDetails = append(report.ErrorDetails, fmt.Sprintf("%s: %v", e.Name, err))
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
 					continue
 				}
@@ -282,6 +293,7 @@ func Sync(env *app.Env, args []string) error {
 			if addedDst != nil {
 				added, err := zipx.CopyRawEntry(addedDst, src.File, e, nil)
 				if err != nil {
+					report.ErrorDetails = append(report.ErrorDetails, fmt.Sprintf("added-copy %s: %v", e.Name, err))
 					env.Logf("warn", "cannot copy added entry %s: %v", e.Name, err)
 				} else {
 					addedEntries = append(addedEntries, added)
@@ -698,6 +710,10 @@ func writeSummary(path string, env *app.Env, r *Report, start time.Time, archive
 		fmt.Fprintln(&b, "Status           : Completed with errors")
 		logPath := filepath.Join(env.LogsDir, time.Now().UTC().Format("2006-01-02")+".log")
 		fmt.Fprintf(&b, "Details          : %d error(s) logged to %s\n", r.Errors, logPath)
+		fmt.Fprintln(&b, "Errors:")
+		for _, detail := range r.ErrorDetails {
+			fmt.Fprintf(&b, "  - %s\n", detail)
+		}
 	} else {
 		fmt.Fprintln(&b, "Status           : OK")
 	}

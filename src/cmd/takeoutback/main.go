@@ -15,6 +15,13 @@ import (
 )
 
 func main() {
+	// On Windows a running executable cannot be overwritten. The updater stages
+	// the new binary as <exe>.next; apply it now, before this process locks the
+	// file again for the rest of the run.
+	if err := updater.ApplyStagedUpdate(); err != nil {
+		fmt.Fprintf(os.Stderr, "takeoutback: staged update failed: %v\n", err)
+	}
+
 	opts := app.EnvOptions{}
 	var sub []string
 	cmd := ""

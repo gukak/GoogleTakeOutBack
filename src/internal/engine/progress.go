@@ -24,8 +24,9 @@ func printArchiveList(paths []string) {
 
 // progressBar renders a simple ASCII progress bar for a single archive.
 type progressBar struct {
-	total int
-	label string
+	total      int
+	label      string
+	maxLineLen int
 }
 
 func newProgressBar(total int, label string) *progressBar {
@@ -34,17 +35,28 @@ func newProgressBar(total int, label string) *progressBar {
 
 // update redraws the bar. current is the number of entries processed so far.
 func (p *progressBar) update(current int) {
+	var line string
 	if p.total <= 0 {
-		fmt.Printf("\r  %s: processing entry %d", p.label, current)
-		return
+		line = fmt.Sprintf("\r  %s: processing entry %d", p.label, current)
+	} else {
+		pct := current * 100 / p.total
+		filled := current * progressWidth / p.total
+		if filled > progressWidth {
+			filled = progressWidth
+		}
+		bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
+		line = fmt.Sprintf("\r  [%s] %s %d/%d (%d%%)", bar, p.label, current, p.total, pct)
 	}
-	pct := current * 100 / p.total
-	filled := current * progressWidth / p.total
-	if filled > progressWidth {
-		filled = progressWidth
+	p.printLine(line)
+}
+
+func (p *progressBar) printLine(line string) {
+	if len(line) < p.maxLineLen {
+		line += strings.Repeat(" ", p.maxLineLen-len(line))
+	} else {
+		p.maxLineLen = len(line)
 	}
-	bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
-	fmt.Printf("\r  [%s] %s %d/%d (%d%%)", bar, p.label, current, p.total, pct)
+	fmt.Print(line)
 }
 
 // finish marks the bar as complete and moves to the next line.
@@ -57,9 +69,10 @@ func (p *progressBar) finish() {
 
 // byteProgressBar renders an ASCII progress bar based on byte counts.
 type byteProgressBar struct {
-	total   int64
-	current int64
-	label   string
+	total      int64
+	current    int64
+	label      string
+	maxLineLen int
 }
 
 func newByteProgressBar(total int64, label string) *byteProgressBar {
@@ -72,17 +85,28 @@ func (p *byteProgressBar) add(n int64) {
 }
 
 func (p *byteProgressBar) update() {
+	var line string
 	if p.total <= 0 {
-		fmt.Printf("\r  %s: %s", p.label, humanSize(p.current))
-		return
+		line = fmt.Sprintf("\r  %s: %s", p.label, humanSize(p.current))
+	} else {
+		pct := int(p.current * 100 / p.total)
+		filled := int(p.current * int64(progressWidth) / p.total)
+		if filled > progressWidth {
+			filled = progressWidth
+		}
+		bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
+		line = fmt.Sprintf("\r  [%s] %s %s / %s (%d%%)", bar, p.label, humanSize(p.current), humanSize(p.total), pct)
 	}
-	pct := int(p.current * 100 / p.total)
-	filled := int(p.current * int64(progressWidth) / p.total)
-	if filled > progressWidth {
-		filled = progressWidth
+	p.printLine(line)
+}
+
+func (p *byteProgressBar) printLine(line string) {
+	if len(line) < p.maxLineLen {
+		line += strings.Repeat(" ", p.maxLineLen-len(line))
+	} else {
+		p.maxLineLen = len(line)
 	}
-	bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
-	fmt.Printf("\r  [%s] %s %s / %s (%d%%)", bar, p.label, humanSize(p.current), humanSize(p.total), pct)
+	fmt.Print(line)
 }
 
 func (p *byteProgressBar) finish() {

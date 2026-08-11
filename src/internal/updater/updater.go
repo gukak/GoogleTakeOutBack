@@ -221,6 +221,38 @@ func looksLikeVersion(s string) bool {
 	return true
 }
 
+// ApplyStagedUpdate replaces the running binary with a previously staged
+// <binary>.next file. This is used on Windows where a running executable cannot
+// be overwritten directly; the updater writes the new binary next to the old one
+// and the replacement happens on the next startup.
+func ApplyStagedUpdate() error {
+	current, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	current, err = filepath.EvalSymlinks(current)
+	if err != nil {
+		return err
+	}
+	next := current + ".next"
+	if _, err := os.Stat(next); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	old := current + ".old"
+	if err := os.Rename(current, old); err != nil {
+		return fmt.Errorf("rename current binary: %w", err)
+	}
+	if err := os.Rename(next, current); err != nil {
+		_ = os.Rename(old, current)
+		return fmt.Errorf("rename staged binary: %w", err)
+	}
+	_ = os.Remove(old)
+	return nil
+}
+
 // compareVersion compares two semantic version strings starting with 'v'.
 // Returns >0 if a is newer than b, 0 if equal, <0 if older.
 func compareVersion(a, b string) int {
