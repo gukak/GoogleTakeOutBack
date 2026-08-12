@@ -9,7 +9,7 @@
 
 TakeOutBack is a portable, offline, cross-platform (Windows 10/11 x64, Linux x86_64)
 application that consolidates multiple Google Takeout ZIP exports into timestamped
-ZIP archives (`Consolidated-YYYYMMDD-HHMMSS.mmm.zip`) while preserving every historical
+ZIP archives (`takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`) while preserving every historical
 file, every historical version of modified files, and all files later removed from
 the Google account. No database, no server, no extraction of full archives.
 
@@ -98,7 +98,7 @@ are ever required on the host.**
 ### 3.2 Storage model — **timestamped consolidated ZIP archives**
 
 **Decision**: The complete historical collection lives in a single *current*
-ZIP file named `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`. On every sync the
+ZIP file named `Archive/takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`. On every sync the
 current archive is opened for append: new and modified entries are written at
 the end, followed by a fresh central directory. Once complete, the archive is
 renamed to a new timestamped name and the previous name is removed from
@@ -123,7 +123,7 @@ A tiny sidecar `Archive/state.json` (a few hundred bytes —
 **NOT user data, archive-derivable**) stores only:
 
 - `version` (sidecar format version, e.g. `1`)
-- `archive_path` (basename of the current `Consolidated-*.zip`)
+- `archive_path` (basename of the current `takeOutBack-*.zip`)
 - `archive_end` (current size of the consolidated archive)
 - `entries` (count)
 - `cd_offset` (offset of the **last valid** central directory)
@@ -267,7 +267,7 @@ A `VERSION` plain-text file in the repo records the latest stable tag for toolin
    launcher copies itself aside or we keep two slots `takeoutback.exe` and
    `takeoutback.exe.next` swapped by a small staging indirection. ( concrete
    recipe in §8. )
-6. Optionally refresh `TakeOutBack.sh` and `TakeOutBack.bat` from the release.
+6. Optionally refresh `takeOutBack.sh` and `takeOutBack.bat` from the release.
 7. On network failure: report "offline, cannot check for updates", exit 0.
 
 The update **never touches** `Archive/`, `Incoming/` or `config/state.json`
@@ -403,7 +403,7 @@ on its own, so the file body is **self-describing**.
    archives. We do NOT attempt to merge a "logical" multi-part set because
    Google's **TAR multi-volume** numbering is just a sequential split, while the
    **ZIP** export format Google offers yields independent ZIPs.
-- The current `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` (if any).
+- The current `Archive/takeOutBack-YYYYMMDD-HHMMSS.mmm.zip` (if any).
 
 ### 6.2 Step-by-step
 
@@ -413,7 +413,7 @@ on its own, so the file body is **self-describing**.
      Optional `--archive-dir PATH`, `--backup-dir PATH` and `--temp-dir PATH`
      override the default `Archive`, `Backup` and `TakeOutBack/temp` directories.
    - Determine the current consolidated archive by scanning the configured
-     archive directory for the lexicographically greatest `Consolidated-*.zip`
+     archive directory for the lexicographically greatest `takeOutBack-*.zip`
      name (timestamp format is sortable; timestamps are in local time).
    - Remove any leftover `*.rebuild` or `*.compact` files in the archive
      directory.
@@ -421,7 +421,7 @@ on its own, so the file body is **self-describing**.
      Print a numbered list of the archives that will be processed.
 
 2. **Acquire lock and backup**
-   - Acquire a cross-run lockfile `Archive/.consolidated.lock`. If it exists and
+   - Acquire a cross-run lockfile `Archive/.takeOutBack.lock`. If it exists and
      the recorded PID is alive, abort with a clear message; otherwise treat it as
      stale and remove it.
    - If a current consolidated archive exists and `--no-backup` was not given,
@@ -476,7 +476,7 @@ on its own, so the file body is **self-describing**.
 
 8. **Logging & reporting** — write `logs/YYYY-MM-DD.log`; print the summary,
    including the paths of the new consolidated archive and, when applicable,
-   the added archive. Write the same summary to `Archive/Consolidated-*.txt`.
+   the added archive. Write the same summary to `Archive/takeOutBack-*.txt`.
 
 ### 6.3 Worst-case complexity
 
@@ -590,9 +590,9 @@ To guarantee a Linux-produced archive opens on Windows and vice-versa:
     `Foo.jpg__v2`, etc. This prevents subtle, surprising Windows-Linux divergent
     history. It's a documented, conservative choice.
    - **Launchers** are platform-specific thin wrappers:
-   - `TakeOutBack.sh` — `#!/usr/bin/env bash`; resolves its own dir; calls
+   - `takeOutBack.sh` — `#!/usr/bin/env bash`; resolves its own dir; calls
      `<dir>/TakeOutBack/tools/linux/takeoutback "$@"`.
-   - `TakeOutBack.bat` — resolves its own directory and calls
+   - `takeOutBack.bat` — resolves its own directory and calls
      `TakeOutBack\tools\windows\takeoutback.exe --root "<dir>." %*`. The trailing
      `.` is appended to the directory so that `"F:\"` (which would escape the
      closing quote in batch) becomes `"F:\."`, a valid path that Go normalizes
@@ -616,7 +616,7 @@ Operating principles:
 Recovery decision tree (run automatically before any sync):
 
 ```
-find current Consolidated-*.zip ->
+find current takeOutBack-*.zip ->
   read sidecar state.json and cd.bak (may be missing) ->
   scan trailing 64 KiB + 22 for EOCD signature with comment == 0 ->
   if found:
@@ -663,18 +663,18 @@ demand; it is too expensive to do on every sync.
 
 ```
 <ProjectRoot>/
-├── TakeOutBack.sh                    # Linux launcher
-├── TakeOutBack.bat                   # Windows launcher
+├── takeOutBack.sh                    # Linux launcher
+├── takeOutBack.bat                   # Windows launcher
 ├── Incoming/                         # user drop folder for new Takeout ZIPs
 │   └── (takeout*.zip)
 ├── Archive/
-│   ├── Consolidated-YYYYMMDD-HHMMSS.mmm.zip  # current consolidated archive
+│   ├── takeOutBack-YYYYMMDD-HHMMSS.mmm.zip  # current consolidated archive
 │   ├── Added-YYYYMMDD-HHMMSS.mmm.zip         # files added in this run
 │   ├── state.json                      # cache/recovery sidecar (NOT user data)
 │   ├── cd.bak                          # last-good CD backup (NOT user data)
-│   └── .consolidated.lock              # cross-run mutex (NOT user data)
+│   └── .takeOutBack.lock              # cross-run mutex (NOT user data)
 ├── Backup/                             # copies of previous Consolidated archives
-│   └── Consolidated-YYYYMMDD-HHMMSS.mmm.zip
+│   └── takeOutBack-YYYYMMDD-HHMMSS.mmm.zip
 └── TakeOutBack/
     ├── app/                          # <reserved> application support files
     ├── tools/
@@ -698,7 +698,7 @@ demand; it is too expensive to do on every sync.
         └── self-update.ps1
 ```
 
-User-facing surface is **only** `TakeOutBack.sh`, `TakeOutBack.bat`, `Incoming/`,
+User-facing surface is **only** `takeOutBack.sh`, `takeOutBack.bat`, `Incoming/`,
 `Archive/` and `Backup/`.
 
 ---
@@ -737,7 +737,7 @@ Both installers:
    - the matching binary (`takeoutback-linux-amd64` or
      `takeoutback-windows-amd64.exe`),
    - its `.sha256` checksum sidecar,
-   - the copy of `TakeOutBack.sh` ·/· `TakeOutBack.bat`,
+   - the copy of `takeOutBack.sh` ·/· `takeOutBack.bat`,
    - `docs/*.md`,
    - `config/settings.json` + `config/policy.json` defaults,
    - the launcher scripts.
@@ -750,8 +750,8 @@ Both installers:
    by setting `TAKEOUTBACK_FETCH_BOTH=1` (default **on** for the external-drive
    use case so the same folder works on both OSes after a single install).
    This is the key convenience hook to satisfy "execute from USB on either OS".
-7. Write `TakeOutBack.sh` (POSIX LF line endings via `printf`, portable enough)
-   and `TakeOutBack.bat` (CRLF) so each OS's launcher works.
+7. Write `takeOutBack.sh` (POSIX LF line endings via `printf`, portable enough)
+   and `takeOutBack.bat` (CRLF) so each OS's launcher works.
 8. Write `config/VERSION`, `config/settings.json`, `config/policy.json`.
 9. Print final instructions. No PATH writes, no env vars, no services.
 
@@ -809,23 +809,23 @@ Skipped files    : 181810
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
-Archive: /path/to/Archive/Consolidated-20260805-123045.123.zip
+Archive: /path/to/Archive/takeOutBack-20260805-123045.123.zip
 Added:   /path/to/Archive/Added-20260805-123045.123.zip
 ```
 
 ### 12.3 CLI surface
 
 ```
-./TakeOutBack.sh                       # default: synchronize
-./TakeOutBack.sh sync                  # explicit sync
-./TakeOutBack.sh verify                # integrity verify (CRC check + size check)
-./TakeOutBack.sh verify --deep         # also re-hash payloads (opt-in)
-./TakeOutBack.sh stats                 # show archive statistics
-./TakeOutBack.sh compact               # prune dead central directories
-./TakeOutBack.sh update                # self-update binary 
-./TakeOutBack.sh menu                  # interactive TTY menu (1..5)
-./TakeOutBack.sh --version
-./TakeOutBack.sh --help
+./takeOutBack.sh                       # default: synchronize
+./takeOutBack.sh sync                  # explicit sync
+./takeOutBack.sh verify                # integrity verify (CRC check + size check)
+./takeOutBack.sh verify --deep         # also re-hash payloads (opt-in)
+./takeOutBack.sh stats                 # show archive statistics
+./takeOutBack.sh compact               # prune dead central directories
+./takeOutBack.sh update                # self-update binary 
+./takeOutBack.sh menu                  # interactive TTY menu (1..5)
+./takeOutBack.sh --version
+./takeOutBack.sh --help
 ```
 
 Interactive menu (when run with TTY):
@@ -915,7 +915,7 @@ released code:
 5. **Windows launcher quoting**: the batch file passes `--root "<dir>."` to
    avoid the `"F:\\"` quote-escape bug in `cmd.exe`.
    6. **Timestamped archives**: consolidated archives are named
-      `Consolidated-YYYYMMDD-HHMMSS.mmm.zip`; each sync also produces an
+      `takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`; each sync also produces an
       `Added-*.zip` and keeps the previous consolidated archive in `Backup/`.
    7. **Stale lock detection**: the lockfile stores the PID; the next run checks
       whether the process is alive before deciding the lock is valid.
@@ -936,7 +936,7 @@ released code:
 | R8 | Maintainer loses Go expertise → maintenance suffers | Medium | Low | The codebase is scoped to < ~3k LoC, stdlib-only, heavily documented. A successor can come up to speed in a day; the spec is in `Architecture.md`. |
 | R9 | The "dead central directory" pile-up inflates archive size | Medium | High (over many syncs) | `--compact` documented; auto-compact option (default off). |
 | R10 | A rare incompatible reader refuses ZIP64 | Low | Low | Document supported readers; offer `--compact --legacy` to rewrite with classic limits when below the thresholds (no-op when above). |
-| R11 | Concurrent runs from two OSes on the same external drive (dual-boot scenario) | Medium | Low | Cross-OS lockfile (`Archive/.consolidated.lock`) using `O_EXCL` + PID + hostname; second instance aborts with exit 4; lock auto-released after stale-ness heuristic. |
+| R11 | Concurrent runs from two OSes on the same external drive (dual-boot scenario) | Medium | Low | Cross-OS lockfile (`Archive/.takeOutBack.lock`) using `O_EXCL` + PID + hostname; second instance aborts with exit 4; lock auto-released after stale-ness heuristic. |
 | R12 | Google Takeout archive larger than 4GiB for a single internal entry | Low | Medium | ZIP64 supported at write time and verified at read time; documented. |
 | R13 | Sensitive personal data in the archive (PII) | Medium | Certain | The archive is on an external drive owned by the user; we add a `--encrypt` future capability roadmap item (AES-2/LZW zip AES-WinZip-compatible) — out of scope for v1, documented in roadmap. |
 

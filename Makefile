@@ -26,8 +26,8 @@ release-assets: checksums
 	cp TakeOutBack/tools/linux/takeoutback.sha256 dist/takeoutback-linux-amd64.sha256
 	cp TakeOutBack/tools/windows/takeoutback.exe dist/takeoutback-windows-amd64.exe
 	cp TakeOutBack/tools/windows/takeoutback.exe.sha256 dist/takeoutback-windows-amd64.exe.sha256
-	cp TakeOutBack.sh dist/TakeOutBack.sh
-	cp TakeOutBack.bat dist/TakeOutBack.bat
+	cp takeOutBack.sh dist/takeOutBack.sh
+	cp takeOutBack.bat dist/takeOutBack.bat
 	cp TakeOutBack/config/settings.json dist/settings.json
 	cp TakeOutBack/config/policy.json dist/policy.json
 	cp TakeOutBack/config/VERSION dist/VERSION

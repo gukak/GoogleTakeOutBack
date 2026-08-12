@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.5] - 2026-08-11
+
+### Changed
+- Version is now read at runtime from `TakeOutBack/config/VERSION`. The version
+  string is no longer hardcoded in the Go source; only `TakeOutBack/config/VERSION`
+  needs to be updated for a release.
+- Launcher scripts are now named `takeOutBack.sh` and `takeOutBack.bat` (lowercase
+  leading `t`). The Windows and Linux launchers now detect and apply a staged
+  `takeoutback.exe.next` / `takeoutback.next` binary before launching, so a
+  single restart after `update` is sufficient.
+- The consolidated archive is now named `takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`
+  instead of `Consolidated-...`. Backups in `Backup/` and summary `.txt` files
+  use the same prefix. The lock file is now `Archive/.takeOutBack.lock`.
+- Duplicate detection is back to a simple, fast CRC32 + uncompressed-size check.
+  The JSON canonicalization / content-hash deduplication logic has been removed
+  to avoid any full-archive reads or decompressions during sync.
+
 ## [v0.5.4] - 2026-08-11
 
 ### Fixed

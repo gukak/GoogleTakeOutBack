@@ -50,8 +50,8 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.9/install.
 
 1. Place your Google Takeout ZIP files in the `Incoming/` folder.
 2. Run the backup command:
-   - Linux: `./TakeOutBack.sh sync`
-   - Windows: `TakeOutBack.bat sync`
+   - Linux: `./takeOutBack.sh sync`
+   - Windows: `takeOutBack.bat sync`
 3. Watch the progress: each archive is listed, then a byte-based progress bar
    shows the compressed megabytes being processed in real time. The bar advances
    smoothly even for a single very large file, and skipped/duplicate entries
@@ -59,7 +59,7 @@ irm https://github.com/gukak/GoogleTakeOutBack/releases/download/v0.4.9/install.
    bar for the backup of the current archive.
 4. Repeat whenever you have a new Takeout export.
 
-Your consolidated archive lives at `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`
+Your consolidated archive lives at `Archive/takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`
 (the local timestamp is updated on every sync, even when nothing changes). The
 first import creates only the consolidated archive. Every later sync that
 contains new or modified files also produces a companion
@@ -85,26 +85,26 @@ not added again.
 You can override the archive and backup directories from the command line:
 
 ```bash
-./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --backup-dir /path/to/backup/disk
+./takeOutBack.sh sync --archive-dir /path/to/archive/disk --backup-dir /path/to/backup/disk
 ```
 
 To skip the backup copy (for example when disk space is very tight):
 
 ```bash
-./TakeOutBack.sh sync --no-backup
+./takeOutBack.sh sync --no-backup
 ```
 
 You can also sync from a different source folder:
 
 ```bash
-./TakeOutBack.sh sync --incoming /path/to/other/zips
+./takeOutBack.sh sync --incoming /path/to/other/zips
 ```
 
 To skip the `Added-*` archive that normally contains only the new or modified
 files from a subsequent import:
 
 ```bash
-./TakeOutBack.sh sync --no-added
+./takeOutBack.sh sync --no-added
 ```
 
 ### Live progress
@@ -133,12 +133,12 @@ Errors           : 0
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
-Archive: /path/to/Archive/Consolidated-20260805-123045.123.zip
+Archive: /path/to/Archive/takeOutBack-20260805-123045.123.zip
 Added:   /path/to/Archive/Added-20260805-123045.123.zip
 ```
 
 TakeOutBack also writes a summary text file next to the consolidated archive,
-for example `Archive/Consolidated-20260805-123045.123.txt`.
+for example `Archive/takeOutBack-20260805-123045.123.txt`.
 
 ## Commands
 

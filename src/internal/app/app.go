@@ -13,8 +13,49 @@ import (
 	"time"
 )
 
-// Version is the current takeoutback version. It is overridden at build time.
-const Version = "v0.5.4"
+// Version is the current takeoutback version, read from TakeOutBack/config/VERSION
+// at startup. If the file cannot be found, it falls back to "dev".
+var Version = readVersion()
+
+func readVersion() string {
+	candidates := versionCandidates()
+	for _, p := range candidates {
+		if data, err := os.ReadFile(p); err == nil {
+			v := strings.TrimSpace(string(data))
+			if v != "" {
+				return v
+			}
+		}
+	}
+	return "dev"
+}
+
+func versionCandidates() []string {
+	var candidates []string
+	if exe, err := os.Executable(); err == nil {
+		if exe, err = filepath.EvalSymlinks(exe); err == nil {
+			candidates = append(candidates, walkParents(filepath.Dir(exe))...)
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, walkParents(cwd)...)
+	}
+	return candidates
+}
+
+func walkParents(start string) []string {
+	var candidates []string
+	dir := start
+	for {
+		candidates = append(candidates, filepath.Join(dir, AppDir, ConfigDir, VersionFileName))
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return candidates
+}
 
 // OwnerRepo is the GitHub owner/repository used by the installer and updater.
 // Change this to the real repository before the first release.
@@ -36,7 +77,7 @@ const (
 
 	StateName     = "state.json"
 	BackupCDName  = "cd.bak"
-	LockName      = ".consolidated.lock"
+	LockName      = ".takeOutBack.lock"
 	SettingsName  = "settings.json"
 	PolicyName    = "policy.json"
 	VersionFileName = "VERSION"
@@ -370,7 +411,7 @@ func NormalizeKey(p string) string {
 	return strings.ToLower(filepath.ToSlash(p))
 }
 
-// CurrentArchive returns the most recent Consolidated-YYYYMMDD-HHMMSS.zip in
+// CurrentArchive returns the most recent takeOutBack-YYYYMMDD-HHMMSS.zip in
 // the Archive directory, or an empty string if none exists. Names are sorted
 // lexicographically because the embedded timestamp format is sortable.
 func (e *Env) CurrentArchive() (string, error) {
@@ -384,7 +425,7 @@ func (e *Env) CurrentArchive() (string, error) {
 			continue
 		}
 		name := ent.Name()
-		if !strings.HasPrefix(name, "Consolidated-") || !strings.HasSuffix(name, ".zip") {
+		if !strings.HasPrefix(name, "takeOutBack-") || !strings.HasSuffix(name, ".zip") {
 			continue
 		}
 		if best == "" || name > best {

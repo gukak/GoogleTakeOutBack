@@ -185,7 +185,7 @@ func menuLoop(defaultRoot string) error {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Println(`
-TakeOutBack Menu
+takeOutBack Menu
 1. Synchronize
 2. Verify archive
 3. View statistics

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TakeOutBack installer for Linux/macOS.
+# takeOutBack installer for Linux/macOS.
 # Usage: curl -fsSL <URL>/install.sh | bash
 # Set TAKEOUTBACK_VERSION to override the release tag.
 set -euo pipefail
@@ -99,13 +99,13 @@ if [ "$FETCH_BOTH" -eq 1 ]; then
     fetch_binary "takeoutback-windows-amd64.exe" "$ROOT/TakeOutBack/tools/windows/takeoutback.exe"
 fi
 
-download "$BASE/TakeOutBack.sh" "$ROOT/TakeOutBack.sh"
-chmod +x "$ROOT/TakeOutBack.sh"
-download "$BASE/TakeOutBack.bat" "$ROOT/TakeOutBack.bat"
+download "$BASE/takeOutBack.sh" "$ROOT/takeOutBack.sh"
+chmod +x "$ROOT/takeOutBack.sh"
+download "$BASE/takeOutBack.bat" "$ROOT/takeOutBack.bat"
 download "$BASE/settings.json" "$ROOT/TakeOutBack/config/settings.json"
 download "$BASE/policy.json" "$ROOT/TakeOutBack/config/policy.json"
 download "$BASE/VERSION" "$ROOT/TakeOutBack/config/VERSION"
 download "$BASE/README.md" "$ROOT/TakeOutBack/docs/README.md"
 
-echo "TakeOutBack $VERSION installed in $ROOT"
-echo "Place Google Takeout ZIP files in $ROOT/Incoming and run $ROOT/TakeOutBack.sh"
+echo "takeOutBack $VERSION installed in $ROOT"
+echo "Place Google Takeout ZIP files in $ROOT/Incoming and run $ROOT/takeOutBack.sh"

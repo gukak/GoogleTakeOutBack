@@ -17,8 +17,8 @@ TakeOutBack/
 │   ├── config/               # default settings and policy
 │   ├── tools/                # native binaries (not committed)
 │   └── ...
-├── TakeOutBack.sh            # Linux launcher
-├── TakeOutBack.bat           # Windows launcher
+├── takeOutBack.sh            # Linux launcher
+├── takeOutBack.bat           # Windows launcher
 ├── Makefile
 └── .github/workflows/        # CI and release automation
 ```

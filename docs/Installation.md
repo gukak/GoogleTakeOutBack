@@ -69,7 +69,7 @@ If you prefer not to pipe scripts from the internet:
 2. Verify the `.sha256` checksum files.
 3. Create the directory structure shown in `README.md`.
 4. Place the binaries in `TakeOutBack/tools/linux/` and `TakeOutBack/tools/windows/`.
-5. Copy `TakeOutBack.sh`, `TakeOutBack.bat` and the files from `TakeOutBack/config/`
+5. Copy `takeOutBack.sh`, `takeOutBack.bat` and the files from `TakeOutBack/config/`
    to the project root.
 
 ## Update
@@ -77,13 +77,13 @@ If you prefer not to pipe scripts from the internet:
 To update the binary and launcher scripts without touching your archives:
 
 ```bash
-./TakeOutBack.sh update
+./takeOutBack.sh update
 ```
 
 On Windows:
 
 ```powershell
-TakeOutBack.bat update
+takeOutBack.bat update
 ```
 
 The updater checks the latest GitHub Release, downloads the matching binary,
@@ -92,8 +92,8 @@ verifies its SHA-256 checksum and replaces the local binary atomically.
 ## Post-Install
 
 1. Copy Google Takeout ZIP files into `Incoming/`.
-2. Run `./TakeOutBack.sh` (Linux) or `TakeOutBack.bat` (Windows).
-3. The consolidated archive is written to `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip`.
+2. Run `./takeOutBack.sh` (Linux) or `takeOutBack.bat` (Windows).
+3. The consolidated archive is written to `Archive/takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`.
 4. A companion `Added-*.zip` with only the new/modified files is written next to it.
 5. The previous consolidated archive is copied to `Backup/` before being replaced.
 

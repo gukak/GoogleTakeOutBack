@@ -1,4 +1,4 @@
-# TakeOutBack installer for Windows.
+# takeOutBack installer for Windows.
 # Usage: irm <URL>/install.ps1 | iex
 # Set $env:TAKEOUTBACK_VERSION to override the release tag.
 
@@ -65,12 +65,12 @@ if ($FetchBoth) {
     FetchBinary "takeoutback-linux-amd64" "$Root\TakeOutBack\tools\linux\takeoutback"
 }
 
-Download "$Base/TakeOutBack.bat" "$Root\TakeOutBack.bat"
-Download "$Base/TakeOutBack.sh" "$Root\TakeOutBack.sh"
+Download "$Base/takeOutBack.bat" "$Root\takeOutBack.bat"
+Download "$Base/takeOutBack.sh" "$Root\takeOutBack.sh"
 Download "$Base/settings.json" "$Root\TakeOutBack\config\settings.json"
 Download "$Base/policy.json" "$Root\TakeOutBack\config\policy.json"
 Download "$Base/VERSION" "$Root\TakeOutBack\config\VERSION"
 Download "$Base/README.md" "$Root\TakeOutBack\docs\README.md"
 
-Write-Host "TakeOutBack $Version installed in $Root"
-Write-Host "Place Google Takeout ZIP files in $Root\Incoming and run $Root\TakeOutBack.bat"
+Write-Host "takeOutBack $Version installed in $Root"
+Write-Host "Place Google Takeout ZIP files in $Root\Incoming and run $Root\takeOutBack.bat"

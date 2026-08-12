@@ -5,8 +5,8 @@
 1. Download your latest Google Takeout export as a ZIP file.
 2. Copy or move it into the `Incoming/` folder inside your TakeOutBack project.
 3. Run the backup command:
-   - Linux: `./TakeOutBack.sh sync`
-   - Windows: `TakeOutBack.bat sync`
+   - Linux: `./takeOutBack.sh sync`
+   - Windows: `takeOutBack.bat sync`
 4. Watch the live progress: TakeOutBack lists the archives it found, then shows
    a byte-based progress bar for each archive while it is being processed (for
    example `12.4 MB / 156.8 MB (8%)`). The bar advances smoothly even when a
@@ -17,34 +17,34 @@
 
 TakeOutBack writes the following files:
 
-- `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — the current consolidated archive
+- `Archive/takeOutBack-YYYYMMDD-HHMMSS.mmm.zip` — the current consolidated archive
   (timestamps are in the system's local time). The consolidated archive always
   gets a new timestamped name, even when every incoming file is skipped.
 - `Archive/Added-YYYYMMDD-HHMMSS.mmm.zip` — only the files added during this run.
   This file is created only for subsequent imports that contain new or modified
   files; the first import produces only the consolidated archive.
-- `Archive/Consolidated-YYYYMMDD-HHMMSS.mmm.txt` — a human-readable summary of the
+- `Archive/takeOutBack-YYYYMMDD-HHMMSS.mmm.txt` — a human-readable summary of the
   run, identical to the console output.
-- `Backup/Consolidated-YYYYMMDD-HHMMSS.mmm.zip` — a copy of the previous consolidated
+- `Backup/takeOutBack-YYYYMMDD-HHMMSS.mmm.zip` — a copy of the previous consolidated
   archive, kept before it is replaced. The last 5 backups are retained.
 
 You can override the archive and backup directories from the command line:
 
 ```bash
-./TakeOutBack.sh sync --archive-dir /path/to/archive/disk --backup-dir /path/to/backup/disk
+./takeOutBack.sh sync --archive-dir /path/to/archive/disk --backup-dir /path/to/backup/disk
 ```
 
 To skip the backup copy:
 
 ```bash
-./TakeOutBack.sh sync --no-backup
+./takeOutBack.sh sync --no-backup
 ```
 
 To skip the companion `Added-*` archive (only the consolidated archive is
 produced):
 
 ```bash
-./TakeOutBack.sh sync --no-added
+./takeOutBack.sh sync --no-added
 ```
 
 If a sync is interrupted (Ctrl+C, power loss, drive removal, full disk), the
@@ -60,8 +60,8 @@ If you want to import from a different folder than `Incoming/`, use the
 `--incoming` option:
 
 ```bash
-./TakeOutBack.sh sync --incoming /path/to/other/zips
-./TakeOutBack.sh sync --incoming=/path/to/other/zips
+./takeOutBack.sh sync --incoming /path/to/other/zips
+./takeOutBack.sh sync --incoming=/path/to/other/zips
 ```
 
 6. Optionally delete the original Takeout ZIP from `Incoming/` (or the custom
@@ -105,7 +105,7 @@ Errors           : 0
 Bytes appended   : 1.42 GiB
 Duration         : 00:02:14
 Status           : OK
-Archive: /path/to/Archive/Consolidated-20260805-123045.123.zip
+Archive: /path/to/Archive/takeOutBack-20260805-123045.123.zip
 Added:   /path/to/Archive/Added-20260805-123045.123.zip
 ```
 
@@ -154,35 +154,35 @@ forever.
 ### Synchronize
 
 ```bash
-./TakeOutBack.sh sync
+./takeOutBack.sh sync
 ```
 
-Running `./TakeOutBack.sh` without arguments now shows the help and does **not**
+Running `./takeOutBack.sh` without arguments now shows the help and does **not**
 start a backup automatically. You must explicitly use the `sync` command.
 
 To skip the backup of the current consolidated archive:
 
 ```bash
-./TakeOutBack.sh sync --no-backup
+./takeOutBack.sh sync --no-backup
 ```
 
 ### Verify
 
 ```bash
-./TakeOutBack.sh verify
+./takeOutBack.sh verify
 ```
 
 Performs a metadata check. Use `--deep` to re-decompress every entry and verify
 CRC32:
 
 ```bash
-./TakeOutBack.sh verify --deep
+./takeOutBack.sh verify --deep
 ```
 
 ### Statistics
 
 ```bash
-./TakeOutBack.sh stats
+./takeOutBack.sh stats
 ```
 
 Shows archive size, number of entries, unique paths and compression ratio.
@@ -190,7 +190,7 @@ Shows archive size, number of entries, unique paths and compression ratio.
 ### Compact
 
 ```bash
-./TakeOutBack.sh compact
+./takeOutBack.sh compact
 ```
 
 Rewrites the archive to remove dead central-directory blocks that accumulate
@@ -200,7 +200,7 @@ needed when the archive becomes noticeably larger than its payload content.
 ### Update
 
 ```bash
-./TakeOutBack.sh update
+./takeOutBack.sh update
 ```
 
 Checks GitHub Releases for a newer version and downloads it. Your archives,
@@ -209,15 +209,15 @@ backups and incoming files are never touched.
 To install a specific release instead of the latest one:
 
 ```bash
-./TakeOutBack.sh update --version v0.4.9
+./takeOutBack.sh update --version v0.4.9
 # or equivalently:
-./TakeOutBack.sh update v0.4.9
+./takeOutBack.sh update v0.4.9
 ```
 
 ### Clean / Reset
 
 ```bash
-./TakeOutBack.sh clean
+./takeOutBack.sh clean
 ```
 
 Removes all files from the incoming, archive and backup directories after
@@ -227,7 +227,7 @@ preserving settings and logs.
 ### Interactive Menu
 
 ```bash
-./TakeOutBack.sh menu
+./takeOutBack.sh menu
 ```
 
 Shows a numbered menu for users who prefer not to type commands. The menu lets

@@ -5,7 +5,7 @@
 TakeOutBack is intentionally simple. Almost every problem can be diagnosed by:
 
 1. Reading the latest log file in `TakeOutBack/logs/`.
-2. Running `./TakeOutBack.sh verify`.
+2. Running `./takeOutBack.sh verify`.
 3. Checking that the project layout is intact.
 
 ## Common Issues
@@ -32,7 +32,7 @@ Another TakeOutBack instance is already running. If you are sure no other
 instance is running, delete the stale lock file:
 
 ```bash
-rm Archive/.consolidated.lock
+rm Archive/.takeOutBack.lock
 ```
 
 ### Sync reports modified files every time
@@ -42,7 +42,7 @@ does not yet contain a matching version. Run sync once, then run it again. The
 second run should report all files as skipped. If it does not, run:
 
 ```bash
-./TakeOutBack.sh verify --deep
+./takeOutBack.sh verify --deep
 ```
 
 ### Archive appears corrupted after a crash
@@ -51,7 +51,7 @@ TakeOutBack runs recovery automatically at the start of every sync. If recovery
 fails, the log file will contain details. You can force a full rebuild with:
 
 ```bash
-./TakeOutBack.sh compact
+./takeOutBack.sh compact
 ```
 
 `compact` reads every valid local file header and writes a brand-new archive.
@@ -70,8 +70,8 @@ First, re-download the suspect Takeout ZIP and run sync again. If the error
 persists, run:
 
 ```bash
-./TakeOutBack.sh compact
-./TakeOutBack.sh verify --deep
+./takeOutBack.sh compact
+./takeOutBack.sh verify --deep
 ```
 
 ### Installer fails to download files
@@ -104,26 +104,26 @@ irm https://github.com/OWNER/REPO/releases/download/v0.4.9/install.ps1 | iex
 
 ### Stale lock after a crash or Ctrl+C
 
-If a sync is interrupted, the lock file `Archive/.consolidated.lock` may be left
+If a sync is interrupted, the lock file `Archive/.takeOutBack.lock` may be left
 behind. TakeOutBack detects this automatically on the next run: it reads the
 PID stored in the lock, and if that process is no longer alive it removes the lock
 and continues. You only need to delete the lock manually if the PID detection
 fails on your platform:
 
 ```bash
-rm Archive/.consolidated.lock
+rm Archive/.takeOutBack.lock
 ```
 
 ### Interrupted sync left partial files
 
 Since v0.4.9, TakeOutBack writes the new consolidated archive directly into
-`Archive/`. If a sync is interrupted, the latest `Consolidated-*.zip` may be
+`Archive/`. If a sync is interrupted, the latest `takeOutBack-*.zip` may be
 partial. The previous archive is safely stored in `Backup/`, so you can restore
 from there if needed.
 
 If you manually find a `*.tmp`, `*.rebuild` or `*.compact` file in `Archive/`,
 it is safe to delete. The current consolidated archive is always named
-`Consolidated-YYYYMMDD-HHMMSS.mmm.zip` and never has a `.tmp` suffix.
+`takeOutBack-YYYYMMDD-HHMMSS.mmm.zip` and never has a `.tmp` suffix.
 
 ### Progress bar appears on many lines instead of one
 
@@ -145,13 +145,13 @@ Include:
 - The full output.
 - The relevant log file from `TakeOutBack/logs/`.
 - Your operating system version.
-- The output of `./TakeOutBack.sh --version`.
+- The output of `./takeOutBack.sh --version`.
 
 ## Recovery Checklist
 
 1. Stop any running TakeOutBack instance.
 2. Back up `Archive/Consolidated.zip` if possible.
-3. Run `./TakeOutBack.sh verify --deep`.
-4. If errors are found, run `./TakeOutBack.sh compact`.
-5. Run `./TakeOutBack.sh verify --deep` again.
+3. Run `./takeOutBack.sh verify --deep`.
+4. If errors are found, run `./takeOutBack.sh compact`.
+5. Run `./takeOutBack.sh verify --deep` again.
 6. If problems persist, open an issue with the logs.
