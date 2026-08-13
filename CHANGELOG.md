@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.6] - 2026-08-12
+
+### Fixed
+- `update` now also downloads the `VERSION` release asset and writes it to
+  `TakeOutBack/config/VERSION`. Because the version string is read from this
+  file at runtime, this prevents the binary from reporting an outdated version
+  after a successful self-update.
+
 ## [v0.5.5] - 2026-08-11
 
 ### Changed

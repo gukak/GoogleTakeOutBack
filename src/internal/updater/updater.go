@@ -96,8 +96,10 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 		version = "v" + version
 	}
 	binName := app.BinaryName()
-	assetURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", app.OwnerRepo, version, binName)
+	baseURL := fmt.Sprintf("https://github.com/%s/releases/download/%s", app.OwnerRepo, version)
+	assetURL := baseURL + "/" + binName
 	sumURL := assetURL + ".sha256"
+	versionURL := baseURL + "/VERSION"
 
 	// GitHub asset downloads redirect to a CDN. Use a client that follows
 	// redirects for the actual file downloads, while the caller's client is
@@ -125,6 +127,13 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 	}
 	if !strings.EqualFold(got, expected) {
 		return fmt.Errorf("checksum mismatch: expected %s got %s", expected, got)
+	}
+
+	// Download the VERSION sidecar so the binary reports the right version on
+	// the next startup (version is read from this file at runtime).
+	versionPath := filepath.Join(env.ConfigDir, "VERSION")
+	if err := downloadFile(downloadClient, versionURL, versionPath); err != nil {
+		env.Logf("warn", "updated binary but could not update VERSION file: %v", err)
 	}
 
 	target := env.BinaryPath()
