@@ -15,7 +15,6 @@ TakeOutBack/temp/
 .takeoutback-root
 
 # Go
-src/go.sum
 src/vendor/
 
 # OS metadata
