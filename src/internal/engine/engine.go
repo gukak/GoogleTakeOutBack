@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gukak/GoogleTakeOutBack/internal/app"
+	"github.com/gukak/GoogleTakeOutBack/internal/safestorage"
 	"github.com/gukak/GoogleTakeOutBack/internal/state"
 	"github.com/gukak/GoogleTakeOutBack/internal/zipx"
 )
@@ -154,7 +155,7 @@ func Sync(env *app.Env, args []string) error {
 	var addedArchivePath string
 	var addedEntries []*zipx.Entry
 	if !isInitial && !noAdded {
-		addedArchiveName := timestampName("Added", ts)
+		addedArchiveName := timestampName("takeOutBack-Added", ts)
 		addedArchivePath = uniqueArchivePath(env.Archive, addedArchiveName)
 		addedDst, err = zipx.OpenOrCreate(addedArchivePath)
 		if err != nil {
@@ -365,6 +366,23 @@ func Sync(env *app.Env, args []string) error {
 		env.Logf("warn", "could not backup central directory: %v", err)
 	}
 
+	// Safe mode storage: upload archives to the configured remote destination.
+	// Failures are logged but never abort the local sync.
+	uploadResults := runSafeModeStorage(env, newArchivePath, addedArchivePath)
+	for _, r := range uploadResults {
+		if r.Error != nil {
+			env.Logf("warn", "safe mode storage failed for %s: %v", r.Label, safestorage.MaskError(r.Error))
+			report.Errors++
+			report.ErrorDetails = append(report.ErrorDetails,
+				fmt.Sprintf("safe mode storage %s: %v", r.Label, safestorage.MaskError(r.Error)))
+		} else if r.Skipped {
+			env.Logf("info", "safe mode storage skipped for %s (already complete)", r.Label)
+		} else {
+			env.Logf("info", "safe mode storage completed for %s -> %s", r.Label, r.RemotePath)
+			env.Summary("Safe copy: %s", r.Label)
+		}
+	}
+
 	report.Duration = time.Since(start)
 	printReport(env, report, start)
 	env.Summary("Archive: %s", newArchivePath)
@@ -380,6 +398,49 @@ func Sync(env *app.Env, args []string) error {
 
 	env.Logf("info", "sync completed in %s, archive=%s", report.Duration, newArchivePath)
 	return nil
+}
+
+func runSafeModeStorage(env *app.Env, archivePath, addedArchivePath string) []safestorage.UploadResult {
+	cfg := env.Settings.SafeModeStorage
+	if cfg.IsEmpty() {
+		return nil
+	}
+
+	uploader, err := safestorage.NewUploader(cfg, func(label string, sent, total int64) {
+		drawByteProgressBar(label, sent, total)
+	})
+	if err != nil {
+		return []safestorage.UploadResult{{
+			Label: "configuration",
+			Error: err,
+		}}
+	}
+	if err := uploader.Connect(); err != nil {
+		_ = uploader.Close()
+		return []safestorage.UploadResult{{
+			Label: "connection",
+			Error: err,
+		}}
+	}
+	defer uploader.Close()
+
+	var tasks []safestorage.UploadTask
+	if cfg.ShouldUpload("takeOutBack") {
+		tasks = append(tasks, safestorage.UploadTask{
+			LocalPath:  archivePath,
+			RemoteName: filepath.Base(archivePath),
+			Label:      "takeOutBack",
+		})
+	}
+	if addedArchivePath != "" && cfg.ShouldUpload("takeOutBack-Added") {
+		tasks = append(tasks, safestorage.UploadTask{
+			LocalPath:  addedArchivePath,
+			RemoteName: filepath.Base(addedArchivePath),
+			Label:      "takeOutBack-Added",
+		})
+	}
+
+	return uploader.Upload(tasks)
 }
 
 func loadExistingIndex(path string) (map[string]*zipx.Entry, []*zipx.Entry, error) {

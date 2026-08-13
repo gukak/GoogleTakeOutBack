@@ -94,7 +94,7 @@ verifies its SHA-256 checksum and replaces the local binary atomically.
 1. Copy Google Takeout ZIP files into `Incoming/`.
 2. Run `./takeOutBack.sh` (Linux) or `takeOutBack.bat` (Windows).
 3. The consolidated archive is written to `Archive/takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`.
-4. A companion `Added-*.zip` with only the new/modified files is written next to it.
+4. A companion `takeOutBack-Added-*.zip` with only the new/modified files is written next to it.
 5. The previous consolidated archive is copied to `Backup/` before being replaced.
 
 No PATH, registry, scheduled task or service is created.

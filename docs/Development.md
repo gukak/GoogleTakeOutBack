@@ -68,7 +68,9 @@ make build-all
 
 ## Coding Conventions
 
-- Use the standard library only; no third-party dependencies at runtime.
+- Prefer the standard library; third-party packages are acceptable when they
+  provide a clear, well-maintained benefit (e.g. SFTP/FTP clients for safe mode
+  storage).
 - Keep packages small and focused.
 - Export identifiers only when necessary; prefer internal packages.
 - Write idiomatic Go with meaningful doc comments on exported symbols.
@@ -76,8 +78,9 @@ make build-all
 
 ## Release Workflow
 
-1. Update `src/internal/app/app.go` `Version` and `TakeOutBack/config/VERSION`.
-2. Update `CHANGELOG.md`.
+1. Update `CHANGELOG.md`.
+2. Update the version in the GitHub Actions workflow and `Makefile` if needed
+   (the binary version is embedded at build time via `-ldflags`).
 3. Update documentation (`README.md`, `docs/*.md`) and the installer scripts
    (`TakeOutBack/scripts/install.sh`, `TakeOutBack/scripts/install.ps1`) to
    reference the new version.

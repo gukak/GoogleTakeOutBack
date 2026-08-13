@@ -27,3 +27,6 @@ desktop.ini
 .idea/
 .vscode/
 *.swp
+
+# Local-only documentation: safe mode storage setup (contains remote details)
+docs/SafeModeStorage.md

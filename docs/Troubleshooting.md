@@ -85,10 +85,11 @@ described in [Installation.md](Installation.md).
 
 ### Update says "Already up to date" but a newer release exists
 
-The updater compares the local version string with the latest GitHub Release
-tag. Ensure:
+The updater compares the embedded version string in the running binary with the
+latest GitHub Release tag. Ensure:
 
-- `TakeOutBack/config/VERSION` matches the installed binary version.
+- The binary was built with the correct `-ldflags` version (or use the official
+  release asset).
 - The newer release is actually published (not a draft).
 - You have network connectivity.
 

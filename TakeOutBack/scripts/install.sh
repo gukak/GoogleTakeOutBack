@@ -104,7 +104,6 @@ chmod +x "$ROOT/takeOutBack.sh"
 download "$BASE/takeOutBack.bat" "$ROOT/takeOutBack.bat"
 download "$BASE/settings.json" "$ROOT/TakeOutBack/config/settings.json"
 download "$BASE/policy.json" "$ROOT/TakeOutBack/config/policy.json"
-download "$BASE/VERSION" "$ROOT/TakeOutBack/config/VERSION"
 download "$BASE/README.md" "$ROOT/TakeOutBack/docs/README.md"
 
 echo "takeOutBack $VERSION installed in $ROOT"

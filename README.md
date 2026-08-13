@@ -20,7 +20,7 @@ Google Takeout ZIP exports into a single logical archive history.
   no dependency on system `zip`, `unzip`, Python or other tools.
 - **Self-updating**: built-in updater fetches new binaries from GitHub Releases
   without touching your archives.
-- **Added-only archive**: each subsequent sync produces a companion `Added-*.zip` containing
+- **Added-only archive**: each subsequent sync produces a companion `takeOutBack-Added-*.zip` containing
   only the files imported during that run.
 - **Stale-lock recovery**: if a previous run was killed (Ctrl+C, power loss),
   the next run detects the abandoned lock and resumes safely.
@@ -120,7 +120,7 @@ Archives to process: 2
 ```
 
 When the run finishes, the usual summary is printed, including the paths to the
-new consolidated archive and, for subsequent imports, the added-only archive:
+new consolidated archive and, for subsequent imports, the takeOutBack-Added archive:
 
 ```
 TakeOutBack v0.4.9

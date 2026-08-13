@@ -19,7 +19,7 @@ The recommended architecture is:
   synchronization engine, written in **Go**.
 - **ZIP as the only storage format** for both input and output.
 - A **timestamped consolidated archive** recreated at each sync, plus a companion
-  `Added-*.zip` containing only the files imported during that run, plus a
+  `takeOutBack-Added-*.zip` containing only the files imported during that run, plus a
   `Backup/` directory holding the previous consolidated archive. A tiny state
   sidecar (`Archive/state.json`) and a backup central-directory sidecar
   (`Archive/cd.bak`) assist recovery.
@@ -111,7 +111,7 @@ Why this model (vs alternatives in §4):
 - Satisfies C3 (ZIP only) and the "single logical consolidated archive" requirement literally.
 - Crash-safe: the previous archive is never touched while the new one is being written.
 - The `Backup/` copy provides an immediately accessible rollback point.
-- The `Added-*.zip` gives a per-sync view of what changed.
+- The `takeOutBack-Added-*.zip` gives a per-sync view of what changed.
 - Cross-platform byte layout: ZIP bodies are platform-independent.
 
 ### 3.3 State model — **deduced from ZIP, with tiny JSON sidecar**
@@ -246,14 +246,14 @@ Asset naming:
 - `takeoutback-linux-amd64.sha256`  ← checksum
 - `takeoutback-windows-amd64.exe.sha256`
 
-A `VERSION` plain-text file in the repo records the latest stable tag for tooling
-/checks. A `RELEASE_CHECKSUMS.txt` accompanies each release.
+The version string is embedded into the binary at build time via `-ldflags`.
+There is no runtime `VERSION` file.
 
 ### 3.8 Update mechanism
 
 `--update` (cli) or menu item 4:
 
-1. Read local `VERSION` / build-time version string.
+1. Read the embedded build-time version string.
 2. Query `https://github.com/<owner>/<repo>/releases/latest` (follow redirects to
    resolve the latest semver tag). Honor `HTTP_PROXY`/`HTTPS_PROXY` if set; pure
    stdlib via `net/http`.
@@ -445,7 +445,7 @@ on its own, so the file body is **self-describing**.
      to its pre-sync state if the run is interrupted.
    - Open the current consolidated archive for append (`O_RDWR|O_APPEND`). For
      the initial import, create a fresh archive in `Archive/`.
-   - For subsequent imports, also create an `Added-*.zip` in `Archive/` unless
+   - For subsequent imports, also create an `takeOutBack-Added-*.zip` in `Archive/` unless
      `--no-added` was given. For the initial import no Added archive is produced.
    - For each valid incoming archive, render a per-archive byte-based progress
      bar and process every entry:
@@ -685,9 +685,8 @@ demand; it is too expensive to do on every sync.
     ├── logs/
     │   └── YYYY-MM-DD.log
     ├── config/
-    │   ├── settings.json             # paths, log level, policy flags
-    │   ├── policy.json               # optional entry filters (default = keep all)
-    │   └── VERSION                   # single line: vX.Y.Z (app version)
+    │   ├── settings.json             # paths, log level, policy flags, safe mode storage
+    │   └── policy.json               # optional entry filters (default = keep all)
     ├── docs/
     │   ├── README, Architecture.md, Installation.md, Usage.md,
     │   ├── Development.md, Troubleshooting.md
@@ -752,7 +751,7 @@ Both installers:
    This is the key convenience hook to satisfy "execute from USB on either OS".
 7. Write `takeOutBack.sh` (POSIX LF line endings via `printf`, portable enough)
    and `takeOutBack.bat` (CRLF) so each OS's launcher works.
-8. Write `config/VERSION`, `config/settings.json`, `config/policy.json`.
+8. Write `config/settings.json` and `config/policy.json`.
 9. Print final instructions. No PATH writes, no env vars, no services.
 
 ### 11.3 Idempotency & upgrades via install
@@ -916,7 +915,7 @@ released code:
    avoid the `"F:\\"` quote-escape bug in `cmd.exe`.
    6. **Timestamped archives**: consolidated archives are named
       `takeOutBack-YYYYMMDD-HHMMSS.mmm.zip`; each sync also produces an
-      `Added-*.zip` and keeps the previous consolidated archive in `Backup/`.
+      `takeOutBack-Added-*.zip` and keeps the previous consolidated archive in `Backup/`.
    7. **Stale lock detection**: the lockfile stores the PID; the next run checks
       whether the process is alive before deciding the lock is valid.
 

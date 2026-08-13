@@ -6,5 +6,20 @@
   "keep_metadata_sidecars": true,
   "drop_incoming_after_sync": false,
   "re_deflate_store": false,
-  "auto_compact_threshold_mb": 0
+  "auto_compact_threshold_mb": 0,
+  "safe_mode_storage": {
+    "enabled": false,
+    "protocol": "sftp",
+    "host": "",
+    "port": 0,
+    "user": "",
+    "password": "",
+    "remote_path": "takeOutBackSafe",
+    "upload_mode": "end",
+    "resume_partial": true,
+    "upload_targets": [
+      "takeOutBack",
+      "takeOutBack-Added"
+    ]
+  }
 }

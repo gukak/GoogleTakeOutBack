@@ -40,7 +40,7 @@ To skip the backup copy:
 ./takeOutBack.sh sync --no-backup
 ```
 
-To skip the companion `Added-*` archive (only the consolidated archive is
+To skip the companion `takeOutBack-Added-*` archive (only the consolidated archive is
 produced):
 
 ```bash

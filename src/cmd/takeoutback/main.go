@@ -174,7 +174,7 @@ Global options:
 Sync options:
   --incoming PATH   Use PATH as the source folder instead of Incoming/
   --no-backup       Do not copy the current archive to Backup/ before sync
-  --no-added        Do not create the Added-* archive for new/modified files
+  --no-added        Do not create the takeOutBack-Added-* archive for new/modified files
 
 When 'sync' is invoked, TakeOutBack lists the incoming archives and starts the
 backup immediately.`, app.Version)
@@ -282,7 +282,7 @@ func promptSyncOptions(reader *bufio.Reader, defaultRoot string) (app.EnvOptions
 	if !confirm(reader, "Create backup of current archive? [Y/n]: ") {
 		args = append(args, "--no-backup")
 	}
-	if !confirm(reader, "Create Added-* archive for new/modified files? [Y/n]: ") {
+	if !confirm(reader, "Create takeOutBack-Added-* archive for new/modified files? [Y/n]: ") {
 		args = append(args, "--no-added")
 	}
 	return opts, args

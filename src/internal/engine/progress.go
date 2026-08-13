@@ -118,6 +118,17 @@ func (p *byteProgressBar) finish() {
 }
 
 // copyFileWithProgress copies src to dst and renders a byte progress bar.
+// drawByteProgressBar prints a single-line byte progress update. It is used by
+// safe mode storage so that remote details are never shown in the bar label.
+func drawByteProgressBar(label string, sent, total int64) {
+	bar := newByteProgressBar(total, label)
+	bar.current = sent
+	bar.update()
+	if sent >= total && total > 0 {
+		bar.finish()
+	}
+}
+
 func copyFileWithProgress(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {

@@ -1,20 +1,22 @@
 .PHONY: build build-windows build-all vet test clean checksums release-assets
 
 VERSION ?= v0.3.0
+GO      ?= go
+LDFLAGS := -s -w -X github.com/gukak/GoogleTakeOutBack/internal/app.Version=$(VERSION)
 
 build:
-	cd src && go build -trimpath -ldflags="-s -w" -o ../TakeOutBack/tools/linux/takeoutback ./cmd/takeoutback
+	cd src && $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o ../TakeOutBack/tools/linux/takeoutback ./cmd/takeoutback
 
 build-windows:
-	cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ../TakeOutBack/tools/windows/takeoutback.exe ./cmd/takeoutback
+	cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o ../TakeOutBack/tools/windows/takeoutback.exe ./cmd/takeoutback
 
 build-all: build build-windows
 
 vet:
-	cd src && go vet ./...
+	cd src && $(GO) vet ./...
 
 test:
-	cd src && go test ./...
+	cd src && $(GO) test ./...
 
 checksums: build-all
 	cd TakeOutBack/tools/linux && sha256sum takeoutback > takeoutback.sha256
@@ -30,7 +32,6 @@ release-assets: checksums
 	cp takeOutBack.bat dist/takeOutBack.bat
 	cp TakeOutBack/config/settings.json dist/settings.json
 	cp TakeOutBack/config/policy.json dist/policy.json
-	cp TakeOutBack/config/VERSION dist/VERSION
 	cp README.md dist/README.md
 
 clean:

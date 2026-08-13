@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.7] - 2026-08-13
+
+### Added
+- Hidden **safe mode storage** feature. After a successful sync, TakeOutBack can
+  upload the consolidated archive (and optionally the `takeOutBack-Added-*`
+  archive) to a remote SFTP or FTP server. All console output and logs refer to
+  this only as "safe mode storage" to keep the feature low-profile.
+- Safe mode storage supports partial resume and skips files that already exist
+  with the same size on the remote destination.
+- New `safe_mode_storage` section in `TakeOutBack/config/settings.json`.
+
+### Changed
+- The version string is now embedded into the binary at build time using
+  `-ldflags -X github.com/gukak/GoogleTakeOutBack/internal/app.Version=...`.
+  The runtime `TakeOutBack/config/VERSION` file is no longer read by the
+  application.
+- Companion archives for subsequent imports are now named
+  `takeOutBack-Added-YYYYMMDD-HHMMSS.mmm.zip` instead of `Added-*`.
+
 ## [v0.5.6] - 2026-08-12
 
 ### Fixed
@@ -14,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TakeOutBack/config/VERSION`. Because the version string is read from this
   file at runtime, this prevents the binary from reporting an outdated version
   after a successful self-update.
+  > This mechanism has been superseded in v0.5.7 by build-time version embedding.
 
 ## [v0.5.5] - 2026-08-11
 
@@ -243,7 +263,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sync` now prints a disk-space plan before writing anything and asks for
   confirmation. The plan estimates the peak space required on each affected disk,
   taking into account the existing consolidated archive, incoming ZIP volume,
-  existing `Added-*.zip` archives, a worst-case new Added archive and the backup
+  existing `takeOutBack-Added-*.zip` archives, a worst-case new Added archive and the backup
   copy. Use `--yes` to skip the prompt.
 - New `--temp-dir PATH` option to use a custom temporary work directory.
 - New `--backup-dir PATH` option to store backup copies of the consolidated
@@ -253,7 +273,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The default command is no longer `sync`. Running `takeoutback` without a
   command now prints the help message.
-- The initial import no longer creates an `Added-*.zip` archive. Added archives are
+- The initial import no longer creates an `takeOutBack-Added-*.zip` archive. Added archives are
   produced only for subsequent imports.
 
 ### Fixed
@@ -275,7 +295,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `Archive/` no longer accumulates partial `.tmp` files; only final
-  `Consolidated-*.zip`, `Added-*.zip`, and sidecar files remain.
+  `Consolidated-*.zip`, `takeOutBack-Added-*.zip`, and sidecar files remain.
 
 ## [v0.3.8] - 2026-08-04
 
@@ -283,7 +303,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Backup/` directory: the previous consolidated archive is copied here before
   each sync is allowed to replace it. The last 5 backups are retained.
 - Timestamped archive names: consolidated archives are now named
-  `Consolidated-YYYYMMDD-HHMMSS.mmm.zip` and a companion `Added-*.zip` is created
+  `Consolidated-YYYYMMDD-HHMMSS.mmm.zip` and a companion `takeOutBack-Added-*.zip` is created
   containing only the files imported during that sync.
 - Stale lock detection: if a sync is interrupted (Ctrl+C, power loss, drive
   removal), the next run detects the abandoned `Archive/.consolidated.lock` and

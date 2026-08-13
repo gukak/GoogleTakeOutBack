@@ -69,7 +69,6 @@ Download "$Base/takeOutBack.bat" "$Root\takeOutBack.bat"
 Download "$Base/takeOutBack.sh" "$Root\takeOutBack.sh"
 Download "$Base/settings.json" "$Root\TakeOutBack\config\settings.json"
 Download "$Base/policy.json" "$Root\TakeOutBack\config\policy.json"
-Download "$Base/VERSION" "$Root\TakeOutBack\config\VERSION"
 Download "$Base/README.md" "$Root\TakeOutBack\docs\README.md"
 
 Write-Host "takeOutBack $Version installed in $Root"
