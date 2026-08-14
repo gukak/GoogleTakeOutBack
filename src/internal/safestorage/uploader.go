@@ -3,6 +3,7 @@ package safestorage
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -138,7 +139,7 @@ func datedDir() string {
 }
 
 func joinRemote(parts ...string) string {
-	return filepath.ToSlash(filepath.Join(parts...))
+	return path.Join(parts...)
 }
 
 // MaskError replaces any remote details with a generic message. Use it when

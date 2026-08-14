@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+	"path"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -92,7 +92,7 @@ func (s *sftpStorage) Upload(localPath, remotePath string, offset int64, progres
 		}
 	}
 
-	if err := s.client.MkdirAll(filepath.Dir(remotePath)); err != nil {
+	if err := s.client.MkdirAll(path.Dir(remotePath)); err != nil {
 		return err
 	}
 

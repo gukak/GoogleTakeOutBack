@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.8] - 2026-08-14
+
+### Fixed
+- Safe mode storage now always uses `/` as the remote path separator, even when
+  the binary runs on Windows. Previously `filepath.Join`/`filepath.Dir` produced
+  backslashes on Windows, causing the SFTP/FTP server to create a single folder
+  literally named `ftpbackup\tmg\...` instead of descending into the intended
+  directory tree.
+
 ## [v0.5.7] - 2026-08-13
 
 ### Added

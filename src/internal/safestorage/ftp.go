@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
@@ -71,7 +71,7 @@ func (s *ftpStorage) Upload(localPath, remotePath string, offset int64, progress
 		}
 	}
 
-	if err := s.ensureDir(filepath.ToSlash(filepath.Dir(remotePath))); err != nil {
+	if err := s.ensureDir(path.Dir(remotePath)); err != nil {
 		return err
 	}
 
