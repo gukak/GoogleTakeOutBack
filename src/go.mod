@@ -3,6 +3,7 @@ module github.com/gukak/GoogleTakeOutBack
 go 1.26
 
 require (
+	github.com/eiannone/keyboard v0.0.0-20220611211555-0d226195f203
 	github.com/jlaffaye/ftp v0.2.2
 	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.55.0

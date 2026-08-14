@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -116,8 +117,9 @@ type Env struct {
 	Settings   Settings
 	Policy     Policy
 
-	logFile  *os.File
-	logStart time.Time
+	logFile    *os.File
+	errLogFile *os.File
+	logStart   time.Time
 }
 
 // NewEnv resolves the project root from the executable or the explicit flag.
@@ -186,9 +188,13 @@ func (e *Env) Close() {
 	if e.logFile != nil {
 		_ = e.logFile.Close()
 	}
+	if e.errLogFile != nil {
+		_ = e.errLogFile.Close()
+	}
 }
 
-// Log writes a log entry to the daily log file.
+// Log writes a log entry to the daily log file. Error and warning entries are
+// also mirrored to the dedicated daily error log.
 func (e *Env) Log(level string, msg string) {
 	if e.logFile == nil {
 		return
@@ -196,6 +202,17 @@ func (e *Env) Log(level string, msg string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	line := fmt.Sprintf("{\"t\":%q,\"lvl\":%q,\"msg\":%q}\n", now, level, msg)
 	_, _ = e.logFile.WriteString(line)
+	if e.errLogFile != nil && isErrorLevel(level) {
+		_, _ = e.errLogFile.WriteString(line)
+	}
+}
+
+func isErrorLevel(level string) bool {
+	switch strings.ToLower(level) {
+	case "error", "warn", "warning", "fatal":
+		return true
+	}
+	return false
 }
 
 // Logf formats a log entry.
@@ -348,6 +365,13 @@ func (e *Env) openLog() error {
 		return err
 	}
 	e.logFile = f
+
+	errPath := filepath.Join(e.LogsDir, day+"-errors.log")
+	e2, err := os.OpenFile(errPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	e.errLogFile = e2
 	return nil
 }
 
@@ -391,6 +415,10 @@ func (e *Env) CurrentArchive() (string, error) {
 		if !strings.HasPrefix(name, "takeOutBack-") || !strings.HasSuffix(name, ".zip") {
 			continue
 		}
+		// Ignore companion Added archives; they are not the consolidated archive.
+		if strings.Contains(name, "-Added-") {
+			continue
+		}
 		if best == "" || name > best {
 			best = name
 		}
@@ -399,6 +427,26 @@ func (e *Env) CurrentArchive() (string, error) {
 		return "", nil
 	}
 	return filepath.Join(e.Archive, best), nil
+}
+
+// versionSuffixRegexp matches a __vN suffix inserted by InsertVersionSuffix.
+var versionSuffixRegexp = regexp.MustCompile(`__v\d+$`)
+
+// BaseName returns the original name of an entry, stripping any version suffix
+// that was added to handle repeated imports of the same logical file. It works
+// on ZIP archive paths (forward slashes).
+func BaseName(name string) string {
+	base := path.Base(name)
+	dir := path.Dir(name)
+	if i := strings.LastIndex(base, "."); i > 0 {
+		base = versionSuffixRegexp.ReplaceAllString(base[:i], "") + base[i:]
+	} else {
+		base = versionSuffixRegexp.ReplaceAllString(base, "")
+	}
+	if dir == "." {
+		return base
+	}
+	return path.Join(dir, base)
 }
 
 // InsertVersionSuffix inserts __vN before the final extension of the basename.

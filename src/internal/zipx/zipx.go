@@ -5,7 +5,6 @@
 package zipx
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -421,18 +420,14 @@ func WriteCentralDir(w *os.File, entries []*Entry) (*EOCD, error) {
 	if err != nil {
 		return nil, err
 	}
-	buf := bufio.NewWriter(w)
 	needsZip64 := len(entries) > 0xFFFF
 	for _, e := range entries {
-		if err := writeCentralDirRecord(buf, e); err != nil {
+		if err := writeCentralDirRecord(w, e); err != nil {
 			return nil, err
 		}
 		if e.CompressedSize > 0xFFFFFFFF || e.UncompressedSize > 0xFFFFFFFF || e.LocalHeaderOff > 0xFFFFFFFF {
 			needsZip64 = true
 		}
-	}
-	if err := buf.Flush(); err != nil {
-		return nil, err
 	}
 	cdEnd, err := w.Seek(0, io.SeekEnd)
 	if err != nil {

@@ -273,13 +273,16 @@ func promptBaseOptions(reader *bufio.Reader, defaultRoot string) app.EnvOptions 
 }
 
 func promptSyncOptions(reader *bufio.Reader, defaultRoot string) (app.EnvOptions, []string) {
-	opts := promptBaseOptions(reader, defaultRoot)
+	opts := app.EnvOptions{Root: defaultRoot}
+	opts.ArchiveDir = promptPath(reader, "Archive directory", "Archive")
 	incoming := promptPath(reader, "Incoming directory", "Incoming")
 	var args []string
 	if incoming != "" {
 		args = []string{"--incoming", incoming}
 	}
-	if !confirm(reader, "Create backup of current archive? [Y/n]: ") {
+	if confirm(reader, "Create backup of current archive? [Y/n]: ") {
+		opts.BackupDir = promptPath(reader, "Backup directory", "Backup")
+	} else {
 		args = append(args, "--no-backup")
 	}
 	if !confirm(reader, "Create takeOutBack-Added-* archive for new/modified files? [Y/n]: ") {

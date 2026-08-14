@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.9] - 2026-08-14
+
+### Added
+- Dedicated daily error log: warnings and errors are now written to both the
+  general log (`YYYY-MM-DD.log`) and a separate `YYYY-MM-DD-errors.log` file.
+- ETA, throughput and adaptive total-time estimates in all byte-based progress
+  bars (backup, sync, safe mode storage uploads).
+- Backup interruption: pressing Esc or Ctrl+C during the backup phase asks for
+  confirmation and, if confirmed, aborts cleanly while leaving the original
+  archive untouched.
+
+### Changed
+- Interactive sync setup now asks whether to create a backup *before* asking for
+  the Backup directory; the Backup directory prompt is skipped when backup is
+  disabled.
+
+### Fixed
+- `CurrentArchive()` no longer selects `takeOutBack-Added-*.zip` as the
+  consolidated archive. This fixes re-syncs creating duplicate archives and
+  `verify` only seeing one entry after a second sync.
+- Duplicate/version detection now indexes entries by their base name, so
+  re-importing the same logical file (with or without version suffix) is
+  correctly detected as already present.
+- Removed `bufio.Writer` from `WriteCentralDir` and dropped `O_APPEND` when
+  opening the consolidated archive for appending, preventing subtle corruption
+  of the central directory/EOCD on some systems.
+
 ## [v0.5.8] - 2026-08-14
 
 ### Fixed

@@ -8,13 +8,13 @@ import (
 )
 
 func TestFindVersion(t *testing.T) {
-	existing := map[string]*zipx.Entry{
-		app.NormalizeKey("Photos/image.jpg"): {
+	versions := []*zipx.Entry{
+		{
 			Name:             "Photos/image.jpg",
 			CRC32:            0x11111111,
 			UncompressedSize: 100,
 		},
-		app.NormalizeKey("Photos/image__v2.jpg"): {
+		{
 			Name:             "Photos/image__v2.jpg",
 			CRC32:            0x22222222,
 			UncompressedSize: 110,
@@ -22,19 +22,19 @@ func TestFindVersion(t *testing.T) {
 	}
 
 	// Exact match with head.
-	_, _, found := findVersion(existing, "Photos/image.jpg", 0x11111111, 100)
+	_, _, found := findVersion(versions, 0x11111111, 100)
 	if !found {
 		t.Fatal("expected to find head version")
 	}
 
 	// Exact match with v2.
-	_, _, found = findVersion(existing, "Photos/image.jpg", 0x22222222, 110)
+	_, _, found = findVersion(versions, 0x22222222, 110)
 	if !found {
 		t.Fatal("expected to find v2 version")
 	}
 
 	// New modified version should get v3.
-	_, next, found := findVersion(existing, "Photos/image.jpg", 0x33333333, 120)
+	_, next, found := findVersion(versions, 0x33333333, 120)
 	if found {
 		t.Fatal("expected no match for new CRC")
 	}

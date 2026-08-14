@@ -5,6 +5,7 @@ package engine
 import (
 	"bufio"
 	"compress/flate"
+	"context"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gukak/GoogleTakeOutBack/internal/app"
+	"github.com/gukak/GoogleTakeOutBack/internal/interrupt"
 	"github.com/gukak/GoogleTakeOutBack/internal/safestorage"
 	"github.com/gukak/GoogleTakeOutBack/internal/state"
 	"github.com/gukak/GoogleTakeOutBack/internal/zipx"
@@ -115,7 +117,14 @@ func Sync(env *app.Env, args []string) error {
 
 	// Backup the current consolidated archive before modifying anything.
 	if !noBackup && currentArchive != "" {
-		if err := backupArchive(env, currentArchive); err != nil {
+		backupCtx, backupCancel := context.WithCancel(context.Background())
+		interruptDone := interrupt.Listen(backupCtx)
+		err := backupArchive(env, currentArchive, backupCtx, interruptDone)
+		backupCancel()
+		if err != nil {
+			if err == context.Canceled {
+				return fmt.Errorf("sync aborted by user during backup")
+			}
 			return fmt.Errorf("cannot backup current archive: %w", err)
 		}
 		if err := rotateBackups(env.Backup, 5); err != nil {
@@ -127,7 +136,7 @@ func Sync(env *app.Env, args []string) error {
 		return fmt.Errorf("recovery failed: %w", err)
 	}
 
-	var existing map[string]*zipx.Entry
+	var existing map[string][]*zipx.Entry
 	var existingEntries []*zipx.Entry
 	if currentArchive != "" {
 		fmt.Println("Loading existing consolidated archive...")
@@ -137,7 +146,7 @@ func Sync(env *app.Env, args []string) error {
 		}
 		fmt.Printf("Loaded %d existing entries.\n", len(existingEntries))
 	} else {
-		existing = map[string]*zipx.Entry{}
+		existing = map[string][]*zipx.Entry{}
 	}
 
 	isInitial := currentArchive == ""
@@ -180,7 +189,7 @@ func Sync(env *app.Env, args []string) error {
 	// create a fresh archive.
 	var archiveDst *os.File
 	if currentArchive != "" {
-		archiveDst, err = os.OpenFile(currentArchive, os.O_RDWR|os.O_APPEND, 0644)
+		archiveDst, err = os.OpenFile(currentArchive, os.O_RDWR, 0644)
 		if err != nil {
 			if addedDst != nil {
 				_ = addedDst.Close()
@@ -224,18 +233,20 @@ func Sync(env *app.Env, args []string) error {
 				bar.add(int64(e.CompressedSize))
 				continue
 			}
-			key := app.NormalizeKey(e.Name)
+			baseKey := app.NormalizeKey(app.BaseName(e.Name))
+			versions := existing[baseKey]
 			var written *zipx.Entry
-			if head, ok := existing[key]; ok {
-				_, next, found := findVersion(existing, head.Name, e.CRC32, e.UncompressedSize)
-				if found {
-					report.SkippedFiles++
-					env.Logf("info", "SKIP identical: %s (crc=%08x size=%d)", e.Name, e.CRC32, e.UncompressedSize)
-					bar.add(int64(e.CompressedSize))
-					continue
-				}
+			match, next, found := findVersion(versions, e.CRC32, e.UncompressedSize)
+			if found {
+				report.SkippedFiles++
+				env.Logf("info", "SKIP identical: %s (crc=%08x size=%d)", match.Name, e.CRC32, e.UncompressedSize)
+				bar.add(int64(e.CompressedSize))
+				continue
+			}
+			if len(versions) > 0 {
+				head := versions[len(versions)-1]
 				env.Logf("info", "MODIFIED: %s existing(crc=%08x size=%d) incoming(crc=%08x size=%d)", head.Name, head.CRC32, head.UncompressedSize, e.CRC32, e.UncompressedSize)
-				e.Name = app.InsertVersionSuffix(head.Name, next)
+				e.Name = app.InsertVersionSuffix(app.BaseName(e.Name), next)
 				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
 				if err != nil {
 					report.Errors++
@@ -257,7 +268,7 @@ func Sync(env *app.Env, args []string) error {
 			}
 			report.BytesAppended += int64(written.CompressedSize)
 			allEntries = append(allEntries, written)
-			existing[app.NormalizeKey(written.Name)] = written
+			existing[baseKey] = append(existing[baseKey], written)
 			appended = true
 
 			// Copy the same entry to the Added archive only for subsequent imports.
@@ -443,8 +454,8 @@ func runSafeModeStorage(env *app.Env, archivePath, addedArchivePath string) []sa
 	return uploader.Upload(tasks)
 }
 
-func loadExistingIndex(path string) (map[string]*zipx.Entry, []*zipx.Entry, error) {
-	emptyIdx := map[string]*zipx.Entry{}
+func loadExistingIndex(path string) (map[string][]*zipx.Entry, []*zipx.Entry, error) {
+	emptyIdx := map[string][]*zipx.Entry{}
 	st, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -460,12 +471,10 @@ func loadExistingIndex(path string) (map[string]*zipx.Entry, []*zipx.Entry, erro
 		return nil, nil, err
 	}
 	defer fr.Close()
-	idx := make(map[string]*zipx.Entry)
+	idx := make(map[string][]*zipx.Entry)
 	for _, e := range fr.Entries {
-		key := app.NormalizeKey(e.Name)
-		if _, ok := idx[key]; !ok {
-			idx[key] = e
-		}
+		key := app.NormalizeKey(app.BaseName(e.Name))
+		idx[key] = append(idx[key], e)
 	}
 	return idx, fr.Entries, nil
 }
@@ -498,7 +507,7 @@ func uniqueArchivePath(dir, name string) string {
 	return filepath.Join(dir, name)
 }
 
-func backupArchive(env *app.Env, src string) error {
+func backupArchive(env *app.Env, src string, ctx context.Context, interruptDone <-chan struct{}) error {
 	if src == "" {
 		return nil
 	}
@@ -518,7 +527,8 @@ func backupArchive(env *app.Env, src string) error {
 	}
 	dst := uniqueArchivePath(env.Backup, filepath.Base(src))
 	fmt.Println("Backing up current consolidated archive...")
-	return copyFileWithProgress(src, dst)
+	fmt.Println("Press Esc or Ctrl+C to interrupt the backup.")
+	return copyFileWithProgress(src, dst, ctx, interruptDone)
 }
 
 func listBackups(dir string) ([]string, error) {
@@ -606,26 +616,13 @@ func shouldSkip(env *app.Env, e *zipx.Entry) bool {
 	return false
 }
 
-func findVersion(existing map[string]*zipx.Entry, plainName string, crc uint32, size uint64) (match *zipx.Entry, next int, found bool) {
-	key := app.NormalizeKey(plainName)
-	if e, ok := existing[key]; ok {
+func findVersion(versions []*zipx.Entry, crc uint32, size uint64) (match *zipx.Entry, next int, found bool) {
+	for _, e := range versions {
 		if e.CRC32 == crc && e.UncompressedSize == size {
-			return e, 1, true
+			return e, 0, true
 		}
 	}
-	next = 2
-	for {
-		vkey := app.NormalizeKey(app.InsertVersionSuffix(plainName, next))
-		if e, ok := existing[vkey]; ok {
-			if e.CRC32 == crc && e.UncompressedSize == size {
-				return e, next, true
-			}
-			next++
-			continue
-		}
-		break
-	}
-	return nil, next, false
+	return nil, len(versions) + 1, false
 }
 
 func acquireLock(path string) (*os.File, error) {

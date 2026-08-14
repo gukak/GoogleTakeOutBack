@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const progressWidth = 30
@@ -73,10 +75,11 @@ type byteProgressBar struct {
 	current    int64
 	label      string
 	maxLineLen int
+	start      time.Time
 }
 
 func newByteProgressBar(total int64, label string) *byteProgressBar {
-	return &byteProgressBar{total: total, label: label}
+	return &byteProgressBar{total: total, label: label, start: time.Now()}
 }
 
 func (p *byteProgressBar) add(n int64) {
@@ -95,9 +98,22 @@ func (p *byteProgressBar) update() {
 			filled = progressWidth
 		}
 		bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
-		line = fmt.Sprintf("\r  [%s] %s %s / %s (%d%%)", bar, p.label, humanSize(p.current), humanSize(p.total), pct)
+		extra := p.timingStats()
+		line = fmt.Sprintf("\r  [%s] %s %s / %s (%d%%) %s", bar, p.label, humanSize(p.current), humanSize(p.total), pct, extra)
 	}
 	p.printLine(line)
+}
+
+func (p *byteProgressBar) timingStats() string {
+	elapsed := time.Since(p.start)
+	if elapsed <= 0 || p.current <= 0 {
+		return "calculating..."
+	}
+	bps := float64(p.current) / elapsed.Seconds()
+	remaining := p.total - p.current
+	eta := time.Duration(float64(remaining) / bps * float64(time.Second))
+	totalEst := time.Duration(float64(p.total) / bps * float64(time.Second))
+	return fmt.Sprintf("%s/s  ETA %s  total ~%s", humanSize(int64(bps)), formatDuration(eta), formatDuration(totalEst))
 }
 
 func (p *byteProgressBar) printLine(line string) {
@@ -129,7 +145,7 @@ func drawByteProgressBar(label string, sent, total int64) {
 	}
 }
 
-func copyFileWithProgress(src, dst string) error {
+func copyFileWithProgress(src, dst string, ctx context.Context, interruptDone <-chan struct{}) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -143,13 +159,28 @@ func copyFileWithProgress(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	aborted := false
+	defer func() {
+		_ = out.Close()
+		if aborted {
+			_ = os.Remove(dst)
+		}
+	}()
 	bar := newByteProgressBar(st.Size(), "backing up archive")
 	buf := make([]byte, 1024*1024)
 	for {
+		select {
+		case <-ctx.Done():
+			aborted = true
+			return ctx.Err()
+		case <-interruptDone:
+			aborted = true
+			return context.Canceled
+		default:
+		}
 		n, err := in.Read(buf)
 		if n > 0 {
 			if _, werr := out.Write(buf[:n]); werr != nil {
-				_ = out.Close()
 				return werr
 			}
 			bar.add(int64(n))
@@ -158,7 +189,6 @@ func copyFileWithProgress(src, dst string) error {
 			break
 		}
 		if err != nil {
-			_ = out.Close()
 			return err
 		}
 	}
