@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -57,31 +58,15 @@ func Update(env *app.Env, args []string) error {
 		return installVersion(env, client, target)
 	}
 
-	// Resolve the latest tag.
-	latestURL := fmt.Sprintf("https://github.com/%s/releases/latest", app.OwnerRepo)
-	req, err := http.NewRequest("HEAD", latestURL, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
+	// Resolve the latest tag via the GitHub API. This is more reliable than
+	// following the /releases/latest redirect, which can be cached or blocked.
+	latest, err := resolveLatestRelease(client)
 	if err != nil {
 		env.Summary("Update check failed: %v", err)
 		return nil
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != 302 && resp.StatusCode != 301 {
-		env.Summary("No update available or offline (status %d)", resp.StatusCode)
-		return nil
-	}
-	loc := resp.Header.Get("Location")
-	if loc == "" {
-		env.Summary("Could not determine latest release")
-		return nil
-	}
-	parts := strings.Split(loc, "/")
-	latest := parts[len(parts)-1]
 	if latest == "" {
-		env.Summary("Could not parse latest release tag")
+		env.Summary("Could not determine latest release")
 		return nil
 	}
 	if compareVersion(latest, app.Version) <= 0 {
@@ -89,6 +74,35 @@ func Update(env *app.Env, args []string) error {
 		return nil
 	}
 	return installVersion(env, client, latest)
+}
+
+// resolveLatestRelease returns the tag name of the latest GitHub release.
+func resolveLatestRelease(client *http.Client) (string, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", app.OwnerRepo)
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "takeoutback/"+app.Version)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", fmt.Errorf("cannot parse release metadata: %w", err)
+	}
+	return release.TagName, nil
 }
 
 func installVersion(env *app.Env, client *http.Client, version string) error {

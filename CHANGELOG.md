@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-08-17
+
+### Fixed
+- `update` now uses the GitHub API to resolve the latest release, avoiding stale
+  `/releases/latest` redirects and rate-limit issues that could hide a new version.
+
 ## [v0.6.0] - 2026-08-17
 
 ### Fixed
