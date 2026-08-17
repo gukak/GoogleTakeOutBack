@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-08-17
+
+### Fixed
+- Progress bars now render on a single line instead of printing a new line on every update.
+- Esc and Ctrl+C now abort the whole `sync` operation (backup, archive copy and safe-mode upload), not only the backup phase.
+- Safe-mode uploads now respect context cancellation and stop early when the user aborts.
+
+### Changed
+- `interrupt.Listen` now listens to Esc, Ctrl+C and SIGTERM and asks for confirmation before aborting.
+
 ## [v0.5.9] - 2026-08-14
 
 ### Added
