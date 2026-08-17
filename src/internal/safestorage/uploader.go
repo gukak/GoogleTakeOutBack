@@ -1,6 +1,7 @@
 package safestorage
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -67,19 +68,30 @@ func (u *Uploader) Close() error {
 
 // Upload runs all configured tasks and returns a result for each one. Errors
 // are returned inside the result slice so callers can report per-file failures.
-func (u *Uploader) Upload(tasks []UploadTask) []UploadResult {
+// The context can be used to abort the upload early.
+func (u *Uploader) Upload(ctx context.Context, tasks []UploadTask) []UploadResult {
 	if u == nil {
 		return nil
 	}
 	results := make([]UploadResult, 0, len(tasks))
 	for _, task := range tasks {
-		res := u.uploadOne(task)
+		select {
+		case <-ctx.Done():
+			results = append(results, UploadResult{
+				Label:     task.Label,
+				LocalPath: task.LocalPath,
+				Error:     ctx.Err(),
+			})
+			continue
+		default:
+		}
+		res := u.uploadOne(ctx, task)
 		results = append(results, res)
 	}
 	return results
 }
 
-func (u *Uploader) uploadOne(task UploadTask) UploadResult {
+func (u *Uploader) uploadOne(ctx context.Context, task UploadTask) UploadResult {
 	res := UploadResult{
 		Label:     task.Label,
 		LocalPath: task.LocalPath,
@@ -109,7 +121,7 @@ func (u *Uploader) uploadOne(task UploadTask) UploadResult {
 	}
 
 	label := maskLabel(task.Label)
-	err = u.storage.Upload(task.LocalPath, remotePath, offset, func(sent, total int64) {
+	err = u.storage.Upload(ctx, task.LocalPath, remotePath, offset, func(sent, total int64) {
 		if u.progress != nil {
 			u.progress(label, sent, total)
 		}

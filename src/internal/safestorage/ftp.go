@@ -1,6 +1,7 @@
 package safestorage
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -52,7 +53,7 @@ func (s *ftpStorage) RemoteSize(remotePath string) (int64, error) {
 	return s.client.FileSize(remotePath)
 }
 
-func (s *ftpStorage) Upload(localPath, remotePath string, offset int64, progress func(sent, total int64)) error {
+func (s *ftpStorage) Upload(ctx context.Context, localPath, remotePath string, offset int64, progress func(sent, total int64)) error {
 	local, err := os.Open(localPath)
 	if err != nil {
 		return err
@@ -77,7 +78,7 @@ func (s *ftpStorage) Upload(localPath, remotePath string, offset int64, progress
 
 	sent := offset
 	pr := &progressReader{
-		Reader: local,
+		Reader: &ctxReader{ctx: ctx, r: local},
 		progress: func(n int) {
 			sent += int64(n)
 			if progress != nil {

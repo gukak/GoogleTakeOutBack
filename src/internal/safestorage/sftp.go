@@ -1,6 +1,7 @@
 package safestorage
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -73,7 +74,7 @@ func (s *sftpStorage) RemoteSize(remotePath string) (int64, error) {
 	return info.Size(), nil
 }
 
-func (s *sftpStorage) Upload(localPath, remotePath string, offset int64, progress func(sent, total int64)) error {
+func (s *sftpStorage) Upload(ctx context.Context, localPath, remotePath string, offset int64, progress func(sent, total int64)) error {
 	local, err := os.Open(localPath)
 	if err != nil {
 		return err
@@ -116,6 +117,11 @@ func (s *sftpStorage) Upload(localPath, remotePath string, offset int64, progres
 
 	buf := make([]byte, 256*1024)
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		n, err := local.Read(buf)
 		if n > 0 {
 			_, werr := remote.Write(buf[:n])

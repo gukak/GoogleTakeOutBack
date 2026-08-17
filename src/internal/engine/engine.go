@@ -115,12 +115,22 @@ func Sync(env *app.Env, args []string) error {
 
 	report := &Report{ArchivesScanned: len(incomingFiles)}
 
+	// Global cancellation context used for the whole sync so Esc/Ctrl+C can
+	// abort any long-running phase, not only the backup copy.
+	syncCtx, syncCancel := context.WithCancel(context.Background())
+	defer syncCancel()
+	interruptDone := interrupt.Listen(syncCtx)
+	go func() {
+		select {
+		case <-interruptDone:
+			syncCancel()
+		case <-syncCtx.Done():
+		}
+	}()
+
 	// Backup the current consolidated archive before modifying anything.
 	if !noBackup && currentArchive != "" {
-		backupCtx, backupCancel := context.WithCancel(context.Background())
-		interruptDone := interrupt.Listen(backupCtx)
-		err := backupArchive(env, currentArchive, backupCtx, interruptDone)
-		backupCancel()
+		err := backupArchive(env, currentArchive, syncCtx, interruptDone)
 		if err != nil {
 			if err == context.Canceled {
 				return fmt.Errorf("sync aborted by user during backup")
@@ -214,6 +224,10 @@ func Sync(env *app.Env, args []string) error {
 	appended := false
 
 	for _, path := range incomingFiles {
+		if interrupted(syncCtx, interruptDone) {
+			cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+			return fmt.Errorf("sync aborted by user")
+		}
 		src, err := zipx.OpenFileRead(path)
 		if err != nil {
 			env.Logf("warn", "skipping invalid archive %s: %v", path, err)
@@ -226,6 +240,11 @@ func Sync(env *app.Env, args []string) error {
 		}
 		bar := newByteProgressBar(totalBytes, filepath.Base(path))
 		for _, e := range src.Entries {
+			if interrupted(syncCtx, interruptDone) {
+				_ = src.Close()
+				cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+				return fmt.Errorf("sync aborted by user")
+			}
 			report.FilesScanned++
 			if shouldSkip(env, e) {
 				report.SkippedFiles++
@@ -379,7 +398,7 @@ func Sync(env *app.Env, args []string) error {
 
 	// Safe mode storage: upload archives to the configured remote destination.
 	// Failures are logged but never abort the local sync.
-	uploadResults := runSafeModeStorage(env, newArchivePath, addedArchivePath)
+	uploadResults := runSafeModeStorage(syncCtx, interruptDone, env, newArchivePath, addedArchivePath)
 	for _, r := range uploadResults {
 		if r.Error != nil {
 			env.Logf("warn", "safe mode storage failed for %s: %v", r.Label, safestorage.MaskError(r.Error))
@@ -411,14 +430,66 @@ func Sync(env *app.Env, args []string) error {
 	return nil
 }
 
-func runSafeModeStorage(env *app.Env, archivePath, addedArchivePath string) []safestorage.UploadResult {
+// interrupted reports whether the current operation should be aborted.
+func interrupted(ctx context.Context, interruptDone <-chan struct{}) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	case <-interruptDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// cleanupOnAbort closes and removes partially written files when the sync is
+// aborted by the user, then attempts to recover the original archive.
+func cleanupOnAbort(env *app.Env, archiveDst, addedDst *os.File, addedArchivePath, currentArchive string) {
+	if archiveDst != nil {
+		_ = archiveDst.Close()
+	}
+	if addedDst != nil {
+		_ = addedDst.Close()
+		_ = os.Remove(addedArchivePath)
+	}
+	if currentArchive != "" {
+		_ = recoverArchive(env, currentArchive)
+	}
+}
+
+func runSafeModeStorage(ctx context.Context, interruptDone <-chan struct{}, env *app.Env, archivePath, addedArchivePath string) []safestorage.UploadResult {
 	cfg := env.Settings.SafeModeStorage
 	if cfg.IsEmpty() {
 		return nil
 	}
 
+	var uploadBar *byteProgressBar
+	var uploadPrev int64
 	uploader, err := safestorage.NewUploader(cfg, func(label string, sent, total int64) {
-		drawByteProgressBar(label, sent, total)
+		if uploadBar == nil || uploadBar.label != label {
+			if uploadBar != nil {
+				uploadBar.finish()
+			}
+			uploadBar = newByteProgressBar(total, label)
+			uploadPrev = 0
+		}
+		delta := sent - uploadPrev
+		if delta > 0 {
+			uploadBar.add(delta)
+			uploadPrev = sent
+		} else {
+			uploadBar.mu.Lock()
+			uploadBar.current = sent
+			uploadBar.lastUpdate = time.Now().Add(-time.Hour)
+			uploadBar.update()
+			uploadBar.mu.Unlock()
+			uploadPrev = sent
+		}
+		if sent >= total && total > 0 {
+			uploadBar.finish()
+			uploadBar = nil
+			uploadPrev = 0
+		}
 	})
 	if err != nil {
 		return []safestorage.UploadResult{{
@@ -451,7 +522,11 @@ func runSafeModeStorage(env *app.Env, archivePath, addedArchivePath string) []sa
 		})
 	}
 
-	return uploader.Upload(tasks)
+	results := uploader.Upload(ctx, tasks)
+	if uploadBar != nil {
+		uploadBar.finish()
+	}
+	return results
 }
 
 func loadExistingIndex(path string) (map[string][]*zipx.Entry, []*zipx.Entry, error) {

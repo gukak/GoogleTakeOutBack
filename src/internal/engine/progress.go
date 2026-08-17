@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,9 +38,9 @@ func newProgressBar(total int, label string) *progressBar {
 
 // update redraws the bar. current is the number of entries processed so far.
 func (p *progressBar) update(current int) {
-	var line string
+	var content string
 	if p.total <= 0 {
-		line = fmt.Sprintf("\r  %s: processing entry %d", p.label, current)
+		content = fmt.Sprintf("  %s: processing entry %d", p.label, current)
 	} else {
 		pct := current * 100 / p.total
 		filled := current * progressWidth / p.total
@@ -47,18 +48,18 @@ func (p *progressBar) update(current int) {
 			filled = progressWidth
 		}
 		bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
-		line = fmt.Sprintf("\r  [%s] %s %d/%d (%d%%)", bar, p.label, current, p.total, pct)
+		content = fmt.Sprintf("  [%s] %s %d/%d (%d%%)", bar, p.label, current, p.total, pct)
 	}
-	p.printLine(line)
+	p.printLine(content)
 }
 
-func (p *progressBar) printLine(line string) {
-	if len(line) < p.maxLineLen {
-		line += strings.Repeat(" ", p.maxLineLen-len(line))
+func (p *progressBar) printLine(content string) {
+	if len(content) < p.maxLineLen {
+		content += strings.Repeat(" ", p.maxLineLen-len(content))
 	} else {
-		p.maxLineLen = len(line)
+		p.maxLineLen = len(content)
 	}
-	fmt.Print(line)
+	fmt.Print("\r" + content)
 }
 
 // finish marks the bar as complete and moves to the next line.
@@ -71,26 +72,40 @@ func (p *progressBar) finish() {
 
 // byteProgressBar renders an ASCII progress bar based on byte counts.
 type byteProgressBar struct {
+	mu         sync.Mutex
 	total      int64
 	current    int64
 	label      string
 	maxLineLen int
 	start      time.Time
+	lastUpdate time.Time
 }
 
 func newByteProgressBar(total int64, label string) *byteProgressBar {
-	return &byteProgressBar{total: total, label: label, start: time.Now()}
+	return &byteProgressBar{
+		total:      total,
+		label:      label,
+		start:      time.Now(),
+		lastUpdate: time.Now().Add(-time.Hour),
+	}
 }
 
 func (p *byteProgressBar) add(n int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.current += n
 	p.update()
 }
 
 func (p *byteProgressBar) update() {
-	var line string
+	if time.Since(p.lastUpdate) < 100*time.Millisecond {
+		return
+	}
+	p.lastUpdate = time.Now()
+
+	var content string
 	if p.total <= 0 {
-		line = fmt.Sprintf("\r  %s: %s", p.label, humanSize(p.current))
+		content = fmt.Sprintf("  %s: %s", p.label, humanSize(p.current))
 	} else {
 		pct := int(p.current * 100 / p.total)
 		filled := int(p.current * int64(progressWidth) / p.total)
@@ -99,9 +114,9 @@ func (p *byteProgressBar) update() {
 		}
 		bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
 		extra := p.timingStats()
-		line = fmt.Sprintf("\r  [%s] %s %s / %s (%d%%) %s", bar, p.label, humanSize(p.current), humanSize(p.total), pct, extra)
+		content = fmt.Sprintf("  [%s] %s %s / %s (%d%%) %s", bar, p.label, humanSize(p.current), humanSize(p.total), pct, extra)
 	}
-	p.printLine(line)
+	p.printLine(content)
 }
 
 func (p *byteProgressBar) timingStats() string {
@@ -111,38 +126,34 @@ func (p *byteProgressBar) timingStats() string {
 	}
 	bps := float64(p.current) / elapsed.Seconds()
 	remaining := p.total - p.current
+	if remaining < 0 {
+		remaining = 0
+	}
 	eta := time.Duration(float64(remaining) / bps * float64(time.Second))
 	totalEst := time.Duration(float64(p.total) / bps * float64(time.Second))
 	return fmt.Sprintf("%s/s  ETA %s  total ~%s", humanSize(int64(bps)), formatDuration(eta), formatDuration(totalEst))
 }
 
-func (p *byteProgressBar) printLine(line string) {
-	if len(line) < p.maxLineLen {
-		line += strings.Repeat(" ", p.maxLineLen-len(line))
+func (p *byteProgressBar) printLine(content string) {
+	if len(content) < p.maxLineLen {
+		content += strings.Repeat(" ", p.maxLineLen-len(content))
 	} else {
-		p.maxLineLen = len(line)
+		p.maxLineLen = len(content)
 	}
-	fmt.Print(line)
+	// \r returns to the start of the line; the trailing spaces clear any
+	// leftover characters from the previous (longer) line.
+	fmt.Print("\r" + content)
 }
 
 func (p *byteProgressBar) finish() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.total > 0 && p.current < p.total {
 		p.current = p.total
+		p.lastUpdate = time.Now().Add(-time.Hour)
 		p.update()
 	}
 	fmt.Println()
-}
-
-// copyFileWithProgress copies src to dst and renders a byte progress bar.
-// drawByteProgressBar prints a single-line byte progress update. It is used by
-// safe mode storage so that remote details are never shown in the bar label.
-func drawByteProgressBar(label string, sent, total int64) {
-	bar := newByteProgressBar(total, label)
-	bar.current = sent
-	bar.update()
-	if sent >= total && total > 0 {
-		bar.finish()
-	}
 }
 
 func copyFileWithProgress(src, dst string, ctx context.Context, interruptDone <-chan struct{}) error {

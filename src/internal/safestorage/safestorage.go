@@ -1,6 +1,7 @@
 package safestorage
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +13,7 @@ type Storage interface {
 	Connect() error
 	Close() error
 	RemoteSize(remotePath string) (int64, error)
-	Upload(localPath, remotePath string, offset int64, progress func(sent, total int64)) error
+	Upload(ctx context.Context, localPath, remotePath string, offset int64, progress func(sent, total int64)) error
 }
 
 // New creates a Storage implementation based on cfg.Protocol.
@@ -41,6 +42,23 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 		pr.progress(n)
 	}
 	return n, err
+}
+
+// ctxReader wraps a reader so it returns ctx.Err() as soon as the context is
+// cancelled. It lets FTP uploads stop reading the local file when the user
+// aborts the operation.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r *ctxReader) Read(p []byte) (int, error) {
+	select {
+	case <-r.ctx.Done():
+		return 0, r.ctx.Err()
+	default:
+	}
+	return r.r.Read(p)
 }
 
 // localFileSize returns the size of path, or 0 if it cannot be determined.
