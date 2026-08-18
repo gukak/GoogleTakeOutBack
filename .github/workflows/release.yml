@@ -9,19 +9,70 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
-
       - name: Build Linux binary
         run: cd src && go build -trimpath -ldflags="-s -w -X github.com/gukak/GoogleTakeOutBack/internal/app.Version=${GITHUB_REF_NAME}" -o ../TakeOutBack/tools/linux/takeoutback ./cmd/takeoutback
+      - name: Upload Linux binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: takeoutback-linux-amd64
+          path: TakeOutBack/tools/linux/takeoutback
+          if-no-files-found: error
 
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
       - name: Build Windows binary
         run: cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X github.com/gukak/GoogleTakeOutBack/internal/app.Version=${GITHUB_REF_NAME}" -o ../TakeOutBack/tools/windows/takeoutback.exe ./cmd/takeoutback
+      - name: Upload Windows binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: takeoutback-windows-amd64.exe
+          path: TakeOutBack/tools/windows/takeoutback.exe
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: takeoutback-linux-amd64
+          path: TakeOutBack/tools/linux/
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: takeoutback-windows-amd64.exe
+          path: TakeOutBack/tools/windows/
+
+      - name: Make Linux binary executable
+        run: chmod +x TakeOutBack/tools/linux/takeoutback
+
+      - name: Verify binaries
+        run: |
+          test -f TakeOutBack/tools/linux/takeoutback
+          test -f TakeOutBack/tools/windows/takeoutback.exe
+          echo "Linux version:"
+          TakeOutBack/tools/linux/takeoutback --version
+          echo "Windows file size:"
+          ls -lh TakeOutBack/tools/windows/takeoutback.exe
 
       - name: Generate checksums
         run: |
@@ -59,6 +110,9 @@ jobs:
           cp docs/Development.md dist/Development.md
           cp docs/Troubleshooting.md dist/Troubleshooting.md
           cp CHANGELOG.md dist/CHANGELOG.md
+
+      - name: List release assets
+        run: ls -lh dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
