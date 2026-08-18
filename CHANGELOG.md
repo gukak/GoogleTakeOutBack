@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.2] - 2026-08-17
+
+### Changed
+- Release workflow now builds Linux and Windows binaries in separate jobs and
+  verifies both artifacts before creating the GitHub Release. A failed build now
+  blocks the release instead of publishing partial assets.
+
 ## [v0.6.1] - 2026-08-17
 
 ### Fixed
