@@ -8,7 +8,7 @@ param(
     [switch]$NoBoth
 )
 
-if (-not $Version) { $Version = "v0.6.2" }
+if (-not $Version) { $Version = "v0.6.3" }
 $OwnerRepo = "gukak/GoogleTakeOutBack"
 $FetchBoth = if ($NoBoth) { $false } else { $true }
 

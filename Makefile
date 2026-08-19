@@ -1,6 +1,6 @@
 .PHONY: build build-windows build-all vet test clean checksums release-assets
 
-VERSION ?= v0.6.2
+VERSION ?= v0.6.3
 GO      ?= go
 LDFLAGS := -s -w -X github.com/gukak/GoogleTakeOutBack/internal/app.Version=$(VERSION)
 
