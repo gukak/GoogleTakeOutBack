@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.4] - 2026-08-20
+
+### Fixed
+- Progress bar now stays on a single line even on narrow terminals: the line is
+  shorter, labels are truncated, and `\033[K` clears the rest of the line
+  instead of padding with spaces.
+- `update` no longer fails with `context deadline exceeded` on slow links: the
+  download timeout was increased to 15 minutes.
+- Esc/Ctrl+C now interrupts the copy of an individual archive entry, not only
+  between entries.
+
+### Changed
+- README quick-start links now point to `releases/latest/download/...`.
+
 ## [v0.6.3] - 2026-08-18
 
 ### Changed
