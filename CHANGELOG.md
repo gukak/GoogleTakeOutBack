@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.5] - 2026-08-20
+
+### Fixed
+- Esc/Ctrl+C now aborts the operation immediately, without asking for
+  confirmation. The previous confirmation prompt was causing the sync to keep
+  running in the background and produced extra lines in the progress output.
+- Progress bar rendering is now handled by a shared package and stays on a
+  single line, even when the terminal is narrow.
+
+### Added
+- `update` now shows a download progress bar.
+
 ## [v0.6.4] - 2026-08-20
 
 ### Fixed
