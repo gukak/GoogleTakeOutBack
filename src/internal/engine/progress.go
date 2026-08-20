@@ -11,7 +11,11 @@ import (
 	"time"
 )
 
-const progressWidth = 30
+const progressWidth = 20
+
+// maxProgressLabel is the longest label we print so the bar stays inside a
+// standard 80-column terminal without wrapping.
+const maxProgressLabel = 25
 
 // printArchiveList prints a numbered list of archives that will be processed.
 func printArchiveList(paths []string) {
@@ -27,9 +31,8 @@ func printArchiveList(paths []string) {
 
 // progressBar renders a simple ASCII progress bar for a single archive.
 type progressBar struct {
-	total      int
-	label      string
-	maxLineLen int
+	total int
+	label string
 }
 
 func newProgressBar(total int, label string) *progressBar {
@@ -38,9 +41,10 @@ func newProgressBar(total int, label string) *progressBar {
 
 // update redraws the bar. current is the number of entries processed so far.
 func (p *progressBar) update(current int) {
+	label := truncateLabel(p.label, maxProgressLabel)
 	var content string
 	if p.total <= 0 {
-		content = fmt.Sprintf("  %s: processing entry %d", p.label, current)
+		content = fmt.Sprintf("  %s: processing entry %d", label, current)
 	} else {
 		pct := current * 100 / p.total
 		filled := current * progressWidth / p.total
@@ -48,18 +52,16 @@ func (p *progressBar) update(current int) {
 			filled = progressWidth
 		}
 		bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
-		content = fmt.Sprintf("  [%s] %s %d/%d (%d%%)", bar, p.label, current, p.total, pct)
+		content = fmt.Sprintf("  [%s] %s %d/%d (%d%%)", bar, label, current, p.total, pct)
 	}
 	p.printLine(content)
 }
 
 func (p *progressBar) printLine(content string) {
-	if len(content) < p.maxLineLen {
-		content += strings.Repeat(" ", p.maxLineLen-len(content))
-	} else {
-		p.maxLineLen = len(content)
-	}
-	fmt.Print("\r" + content)
+	// \r returns to the start of the line; \033[K clears everything to the end
+	// of the line. This is more reliable than padding with spaces, which can
+	// wrap on narrow terminals and leave leftover characters.
+	fmt.Print("\r" + content + "\033[K")
 }
 
 // finish marks the bar as complete and moves to the next line.
@@ -76,7 +78,6 @@ type byteProgressBar struct {
 	total      int64
 	current    int64
 	label      string
-	maxLineLen int
 	start      time.Time
 	lastUpdate time.Time
 }
@@ -104,8 +105,9 @@ func (p *byteProgressBar) update() {
 	p.lastUpdate = time.Now()
 
 	var content string
+	label := truncateLabel(p.label, maxProgressLabel)
 	if p.total <= 0 {
-		content = fmt.Sprintf("  %s: %s", p.label, humanSize(p.current))
+		content = fmt.Sprintf("  %s: %s", label, humanSizeCompact(p.current))
 	} else {
 		pct := int(p.current * 100 / p.total)
 		filled := int(p.current * int64(progressWidth) / p.total)
@@ -114,7 +116,7 @@ func (p *byteProgressBar) update() {
 		}
 		bar := strings.Repeat("=", filled) + strings.Repeat(" ", progressWidth-filled)
 		extra := p.timingStats()
-		content = fmt.Sprintf("  [%s] %s %s / %s (%d%%) %s", bar, p.label, humanSize(p.current), humanSize(p.total), pct, extra)
+		content = fmt.Sprintf("  [%s] %s %s/%s (%d%%) %s", bar, label, humanSizeCompact(p.current), humanSizeCompact(p.total), pct, extra)
 	}
 	p.printLine(content)
 }
@@ -130,19 +132,14 @@ func (p *byteProgressBar) timingStats() string {
 		remaining = 0
 	}
 	eta := time.Duration(float64(remaining) / bps * float64(time.Second))
-	totalEst := time.Duration(float64(p.total) / bps * float64(time.Second))
-	return fmt.Sprintf("%s/s  ETA %s  total ~%s", humanSize(int64(bps)), formatDuration(eta), formatDuration(totalEst))
+	return fmt.Sprintf("%s/s ETA %s", humanSizeCompact(int64(bps)), formatDurationShort(eta))
 }
 
 func (p *byteProgressBar) printLine(content string) {
-	if len(content) < p.maxLineLen {
-		content += strings.Repeat(" ", p.maxLineLen-len(content))
-	} else {
-		p.maxLineLen = len(content)
-	}
-	// \r returns to the start of the line; the trailing spaces clear any
-	// leftover characters from the previous (longer) line.
-	fmt.Print("\r" + content)
+	// \r returns to the start of the line; \033[K clears everything to the end
+	// of the line. This avoids the wrapping/leftover issues caused by padding
+	// with spaces on narrow terminals.
+	fmt.Print("\r" + content + "\033[K")
 }
 
 func (p *byteProgressBar) finish() {
@@ -154,6 +151,37 @@ func (p *byteProgressBar) finish() {
 		p.update()
 	}
 	fmt.Println()
+}
+
+// truncateLabel shortens a string to at most max runes, adding "..." when
+// truncation occurs. It keeps progress bars inside a standard terminal width.
+func truncateLabel(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(r[:max])
+	}
+	return string(r[:max-3]) + "..."
+}
+
+// humanSizeCompact is like humanSize but omits the space between value and unit
+// so the progress bar takes fewer columns.
+func humanSizeCompact(n int64) string {
+	return strings.ReplaceAll(humanSize(n), " ", "")
+}
+
+// formatDurationShort returns a compact H:MM:SS or M:SS representation.
+func formatDurationShort(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := d / time.Hour
+	m := (d % time.Hour) / time.Minute
+	s := (d % time.Minute) / time.Second
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%d:%02d", m, s)
 }
 
 func copyFileWithProgress(src, dst string, ctx context.Context, interruptDone <-chan struct{}) error {

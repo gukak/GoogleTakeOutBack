@@ -115,9 +115,9 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 	sumURL := assetURL + ".sha256"
 
 	// GitHub asset downloads redirect to a CDN. Use a client that follows
-	// redirects for the actual file downloads, while the caller's client is
-	// kept redirect-less for the /releases/latest HEAD resolution.
-	downloadClient := &http.Client{Timeout: 60 * time.Second}
+	// redirects for the actual file downloads. The timeout is long because
+	// users on slow links need time to download the multi-megabyte binaries.
+	downloadClient := &http.Client{Timeout: 15 * time.Minute}
 
 	env.Summary("Downloading %s...", version)
 	binPath := filepath.Join(filepath.Dir(env.BinaryPath()), ".tmp", binName)

@@ -262,12 +262,24 @@ func Sync(env *app.Env, args []string) error {
 				bar.add(int64(e.CompressedSize))
 				continue
 			}
+			progressFn := func(n int64) error {
+				if interrupted(syncCtx, interruptDone) {
+					return context.Canceled
+				}
+				bar.add(n)
+				return nil
+			}
 			if len(versions) > 0 {
 				head := versions[len(versions)-1]
 				env.Logf("info", "MODIFIED: %s existing(crc=%08x size=%d) incoming(crc=%08x size=%d)", head.Name, head.CRC32, head.UncompressedSize, e.CRC32, e.UncompressedSize)
 				e.Name = app.InsertVersionSuffix(app.BaseName(e.Name), next)
-				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
+				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, progressFn)
 				if err != nil {
+					if err == context.Canceled {
+						_ = src.Close()
+						cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+						return fmt.Errorf("sync aborted by user")
+					}
 					report.Errors++
 					report.ErrorDetails = append(report.ErrorDetails, fmt.Sprintf("%s: %v", e.Name, err))
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
@@ -276,8 +288,13 @@ func Sync(env *app.Env, args []string) error {
 				report.ModifiedFiles++
 			} else {
 				env.Logf("info", "NEW: %s (crc=%08x size=%d)", e.Name, e.CRC32, e.UncompressedSize)
-				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, bar.add)
+				written, err = zipx.CopyRawEntry(archiveDst, src.File, e, progressFn)
 				if err != nil {
+					if err == context.Canceled {
+						_ = src.Close()
+						cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+						return fmt.Errorf("sync aborted by user")
+					}
 					report.Errors++
 					report.ErrorDetails = append(report.ErrorDetails, fmt.Sprintf("%s: %v", e.Name, err))
 					env.Logf("warn", "cannot append %s: %v", e.Name, err)
