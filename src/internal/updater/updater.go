@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gukak/GoogleTakeOutBack/internal/app"
+	"github.com/gukak/GoogleTakeOutBack/internal/progressbar"
 )
 
 // Update checks GitHub Releases for a newer version and installs it.
@@ -124,7 +125,7 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 	if err := os.MkdirAll(filepath.Dir(binPath), 0755); err != nil {
 		return err
 	}
-	if err := downloadFile(downloadClient, assetURL, binPath); err != nil {
+	if err := downloadFile(downloadClient, assetURL, binPath, version); err != nil {
 		return err
 	}
 	defer os.Remove(binPath)
@@ -165,7 +166,7 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 	return nil
 }
 
-func downloadFile(client *http.Client, url, path string) error {
+func downloadFile(client *http.Client, url, path, label string) error {
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
@@ -181,11 +182,34 @@ func downloadFile(client *http.Client, url, path string) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(out, resp.Body)
+
+	var reader io.Reader = resp.Body
+	if resp.ContentLength > 0 {
+		bar := progressbar.NewByte(resp.ContentLength, label)
+		defer bar.Finish()
+		reader = &progressReader{resp.Body, 0, bar}
+	}
+
+	_, err = io.Copy(out, reader)
 	if cerr := out.Close(); cerr != nil && err == nil {
 		err = cerr
 	}
 	return err
+}
+
+type progressReader struct {
+	r   io.Reader
+	sent int64
+	bar *progressbar.Byte
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.r.Read(p)
+	if n > 0 {
+		pr.sent += int64(n)
+		pr.bar.Add(int64(n))
+	}
+	return n, err
 }
 
 func downloadText(client *http.Client, url string) (string, error) {

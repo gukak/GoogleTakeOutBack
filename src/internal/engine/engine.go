@@ -20,6 +20,7 @@ import (
 
 	"github.com/gukak/GoogleTakeOutBack/internal/app"
 	"github.com/gukak/GoogleTakeOutBack/internal/interrupt"
+	"github.com/gukak/GoogleTakeOutBack/internal/progressbar"
 	"github.com/gukak/GoogleTakeOutBack/internal/safestorage"
 	"github.com/gukak/GoogleTakeOutBack/internal/state"
 	"github.com/gukak/GoogleTakeOutBack/internal/zipx"
@@ -238,7 +239,7 @@ func Sync(env *app.Env, args []string) error {
 		for _, e := range src.Entries {
 			totalBytes += int64(e.CompressedSize)
 		}
-		bar := newByteProgressBar(totalBytes, filepath.Base(path))
+		bar := progressbar.NewByte(totalBytes, filepath.Base(path))
 		for _, e := range src.Entries {
 			if interrupted(syncCtx, interruptDone) {
 				_ = src.Close()
@@ -249,7 +250,7 @@ func Sync(env *app.Env, args []string) error {
 			if shouldSkip(env, e) {
 				report.SkippedFiles++
 				env.Logf("info", "SKIP policy: %s", e.Name)
-				bar.add(int64(e.CompressedSize))
+				bar.Add(int64(e.CompressedSize))
 				continue
 			}
 			baseKey := app.NormalizeKey(app.BaseName(e.Name))
@@ -259,14 +260,14 @@ func Sync(env *app.Env, args []string) error {
 			if found {
 				report.SkippedFiles++
 				env.Logf("info", "SKIP identical: %s (crc=%08x size=%d)", match.Name, e.CRC32, e.UncompressedSize)
-				bar.add(int64(e.CompressedSize))
+				bar.Add(int64(e.CompressedSize))
 				continue
 			}
 			progressFn := func(n int64) error {
 				if interrupted(syncCtx, interruptDone) {
 					return context.Canceled
 				}
-				bar.add(n)
+				bar.Add(n)
 				return nil
 			}
 			if len(versions) > 0 {
@@ -319,7 +320,7 @@ func Sync(env *app.Env, args []string) error {
 			}
 			env.Logf("info", "appended %s (%d bytes compressed)", written.Name, written.CompressedSize)
 		}
-		bar.finish()
+		bar.Finish()
 		_ = src.Close()
 	}
 
@@ -480,31 +481,30 @@ func runSafeModeStorage(ctx context.Context, interruptDone <-chan struct{}, env 
 		return nil
 	}
 
-	var uploadBar *byteProgressBar
+	var uploadBar *progressbar.Byte
+	var uploadBarLabel string
 	var uploadPrev int64
 	uploader, err := safestorage.NewUploader(cfg, func(label string, sent, total int64) {
-		if uploadBar == nil || uploadBar.label != label {
+		if uploadBar == nil || uploadBarLabel != label {
 			if uploadBar != nil {
-				uploadBar.finish()
+				uploadBar.Finish()
 			}
-			uploadBar = newByteProgressBar(total, label)
+			uploadBar = progressbar.NewByte(total, label)
+			uploadBarLabel = label
 			uploadPrev = 0
 		}
 		delta := sent - uploadPrev
 		if delta > 0 {
-			uploadBar.add(delta)
+			uploadBar.Add(delta)
 			uploadPrev = sent
 		} else {
-			uploadBar.mu.Lock()
-			uploadBar.current = sent
-			uploadBar.lastUpdate = time.Now().Add(-time.Hour)
-			uploadBar.update()
-			uploadBar.mu.Unlock()
+			uploadBar.Set(sent)
 			uploadPrev = sent
 		}
 		if sent >= total && total > 0 {
-			uploadBar.finish()
+			uploadBar.Finish()
 			uploadBar = nil
+			uploadBarLabel = ""
 			uploadPrev = 0
 		}
 	})
@@ -541,7 +541,7 @@ func runSafeModeStorage(ctx context.Context, interruptDone <-chan struct{}, env 
 
 	results := uploader.Upload(ctx, tasks)
 	if uploadBar != nil {
-		uploadBar.finish()
+		uploadBar.Finish()
 	}
 	return results
 }
@@ -803,7 +803,7 @@ func printReport(env *app.Env, r *Report, start time.Time) {
 	env.Summary("Modified files   : %d", r.ModifiedFiles)
 	env.Summary("Skipped files    : %d", r.SkippedFiles)
 	env.Summary("Errors           : %d", r.Errors)
-	env.Summary("Bytes appended   : %s", humanSize(r.BytesAppended))
+	env.Summary("Bytes appended   : %s", progressbar.HumanSize(r.BytesAppended))
 	env.Summary("Duration         : %s", formatDuration(d))
 	if r.Errors > 0 {
 		env.Summary("Status           : Completed with errors")
@@ -824,7 +824,7 @@ func writeSummary(path string, env *app.Env, r *Report, start time.Time, archive
 	fmt.Fprintf(&b, "Modified files   : %d\n", r.ModifiedFiles)
 	fmt.Fprintf(&b, "Skipped files    : %d\n", r.SkippedFiles)
 	fmt.Fprintf(&b, "Errors           : %d\n", r.Errors)
-	fmt.Fprintf(&b, "Bytes appended   : %s\n", humanSize(r.BytesAppended))
+	fmt.Fprintf(&b, "Bytes appended   : %s\n", progressbar.HumanSize(r.BytesAppended))
 	fmt.Fprintf(&b, "Duration         : %s\n", formatDuration(d))
 	if r.Errors > 0 {
 		fmt.Fprintln(&b, "Status           : Completed with errors")
@@ -942,19 +942,6 @@ func preserveCurrentState(env *app.Env, archivePath string) error {
 		env.Logf("warn", "could not backup central directory: %v", err)
 	}
 	return nil
-}
-
-func humanSize(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for n/div >= unit && exp < 4 {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %cB", float64(n)/float64(div), "KMGT"[exp])
 }
 
 func formatDuration(d time.Duration) string {
@@ -1234,11 +1221,11 @@ func Stats(env *app.Env, args []string) error {
 	}
 
 	env.Summary("TakeOutBack statistics")
-	env.Summary("Archive size:       %s", humanSize(st.Size()))
+	env.Summary("Archive size:       %s", progressbar.HumanSize(st.Size()))
 	env.Summary("Entries:            %d", len(fr.Entries))
 	env.Summary("Unique paths:       %d", len(versions))
-	env.Summary("Compressed total:   %s", humanSize(totalComp))
-	env.Summary("Uncompressed total: %s", humanSize(totalUncomp))
+	env.Summary("Compressed total:   %s", progressbar.HumanSize(totalComp))
+	env.Summary("Uncompressed total: %s", progressbar.HumanSize(totalUncomp))
 	env.Summary("Ratio:              %.1f%%", ratio(totalComp, totalUncomp))
 	return nil
 }
@@ -1331,7 +1318,7 @@ func Compact(env *app.Env, args []string) error {
 	}
 	_ = os.Remove(env.StatePath)
 	_ = os.Remove(env.BackupCD)
-	env.Summary("Compacted archive: %s -> %s", humanSize(st.Size()), humanSize(st2.Size()))
+	env.Summary("Compacted archive: %s -> %s", progressbar.HumanSize(st.Size()), progressbar.HumanSize(st2.Size()))
 	return nil
 }
 
