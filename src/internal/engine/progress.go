@@ -35,7 +35,7 @@ func newProgressBar(total int, label string) *progressBar {
 
 // update redraws the bar. current is the number of entries processed so far.
 func (p *progressBar) update(current int) {
-	label := progressbar.TruncateLabel(p.label, 25)
+	label := p.label
 	var content string
 	if p.total <= 0 {
 		content = fmt.Sprintf("  %s: processing entry %d", label, current)

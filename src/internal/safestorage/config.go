@@ -10,7 +10,8 @@ type Config struct {
 	// are ignored and no remote connection is attempted.
 	Enabled bool `json:"enabled"`
 
-	// Protocol is one of "sftp" or "ftp".
+	// Protocol is one of "sftp", "ftp" or "local".
+	// "local" copies archives to a local path or a mounted network share.
 	Protocol string `json:"protocol"`
 
 	// Host is the remote server hostname or IP address.
@@ -46,7 +47,13 @@ type Config struct {
 
 // IsEmpty reports whether the configuration is effectively disabled or blank.
 func (c Config) IsEmpty() bool {
-	return !c.Enabled || c.Host == "" || c.User == "" || len(c.UploadTargets) == 0
+	if !c.Enabled || len(c.UploadTargets) == 0 {
+		return true
+	}
+	if c.Protocol == "local" {
+		return c.RemotePath == ""
+	}
+	return c.Host == "" || c.User == ""
 }
 
 // ShouldUpload returns true when target ("takeOutBack" or "takeOutBack-Added")

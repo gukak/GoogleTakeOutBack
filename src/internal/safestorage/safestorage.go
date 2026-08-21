@@ -23,6 +23,8 @@ func New(cfg Config) (Storage, error) {
 		return newSFTP(cfg), nil
 	case "ftp":
 		return newFTP(cfg), nil
+	case "local":
+		return newLocal(cfg), nil
 	case "":
 		return nil, fmt.Errorf("safe mode storage protocol not configured")
 	default:

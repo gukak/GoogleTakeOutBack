@@ -42,6 +42,14 @@ func (p *Byte) Add(n int64) {
 	p.update()
 }
 
+// SetLabel changes the label shown by the bar. It is useful when a single bar
+// tracks the progress of several files and should display the current file name.
+func (p *Byte) SetLabel(label string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.label = label
+}
+
 // Set sets the current byte count and redraws the bar. It is useful when the
 // caller resumes from a known offset.
 func (p *Byte) Set(n int64) {
@@ -59,7 +67,7 @@ func (p *Byte) update() {
 	p.lastUpdate = time.Now()
 
 	var content string
-	label := TruncateLabel(p.label, maxLabel)
+	label := p.label
 	if p.total <= 0 {
 		content = fmt.Sprintf("  %s: %s", label, HumanSizeCompact(p.current))
 	} else {

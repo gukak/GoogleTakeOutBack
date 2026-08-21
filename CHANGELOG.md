@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.7] - 2026-08-21
+
+### Added
+- `safe_mode_storage` now supports a `"local"` protocol. Archives can be copied
+  to a local directory or a mounted network share (`remote_path`). Partial
+  uploads are resumed when `resume_partial` is enabled.
+
+### Changed
+- Progress bars no longer truncate file names.
+- A single global progress bar now tracks the whole sync and shows a global
+  ETA. The current archive name is displayed in full as the bar label.
+- Safe mode storage now also runs when the sync only rotates the archive
+  timestamp (no new or modified files).
+
 ## [v0.6.6] - 2026-08-21
 
 ### Fixed

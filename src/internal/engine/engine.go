@@ -108,6 +108,12 @@ func Sync(env *app.Env, args []string) error {
 
 	printArchiveList(incomingFiles)
 
+	globalTotal := computeTotalBytes(incomingFiles)
+	var globalBar *progressbar.Byte
+	if globalTotal > 0 {
+		globalBar = progressbar.NewByte(globalTotal, "total")
+	}
+
 	lockFile, err := acquireLock(env.LockPath)
 	if err != nil {
 		return err
@@ -235,11 +241,10 @@ func Sync(env *app.Env, args []string) error {
 			fmt.Printf("Skipping invalid archive: %s\n", filepath.Base(path))
 			continue
 		}
-		var totalBytes int64
-		for _, e := range src.Entries {
-			totalBytes += int64(e.CompressedSize)
+		if globalBar != nil {
+			globalBar.SetLabel(filepath.Base(path))
 		}
-		bar := progressbar.NewByte(totalBytes, filepath.Base(path))
+
 		for _, e := range src.Entries {
 			if interrupted(syncCtx, interruptDone) {
 				_ = src.Close()
@@ -250,7 +255,9 @@ func Sync(env *app.Env, args []string) error {
 			if shouldSkip(env, e) {
 				report.SkippedFiles++
 				env.Logf("info", "SKIP policy: %s", e.Name)
-				bar.Add(int64(e.CompressedSize))
+				if globalBar != nil {
+					globalBar.Add(int64(e.CompressedSize))
+				}
 				continue
 			}
 			baseKey := app.NormalizeKey(app.BaseName(e.Name))
@@ -260,14 +267,18 @@ func Sync(env *app.Env, args []string) error {
 			if found {
 				report.SkippedFiles++
 				env.Logf("info", "SKIP identical: %s (crc=%08x size=%d)", match.Name, e.CRC32, e.UncompressedSize)
-				bar.Add(int64(e.CompressedSize))
+				if globalBar != nil {
+					globalBar.Add(int64(e.CompressedSize))
+				}
 				continue
 			}
 			progressFn := func(n int64) error {
 				if interrupted(syncCtx, interruptDone) {
 					return context.Canceled
 				}
-				bar.Add(n)
+				if globalBar != nil {
+					globalBar.Add(n)
+				}
 				return nil
 			}
 			if len(versions) > 0 {
@@ -320,8 +331,10 @@ func Sync(env *app.Env, args []string) error {
 			}
 			env.Logf("info", "appended %s (%d bytes compressed)", written.Name, written.CompressedSize)
 		}
-		bar.Finish()
 		_ = src.Close()
+	}
+	if globalBar != nil {
+		globalBar.Finish()
 	}
 
 	if !appended {
@@ -603,6 +616,21 @@ func uniqueArchivePath(dir, name string) string {
 		}
 	}
 	return filepath.Join(dir, name)
+}
+
+func computeTotalBytes(paths []string) int64 {
+	var total int64
+	for _, path := range paths {
+		src, err := zipx.OpenFileRead(path)
+		if err != nil {
+			continue
+		}
+		for _, e := range src.Entries {
+			total += int64(e.CompressedSize)
+		}
+		_ = src.Close()
+	}
+	return total
 }
 
 func backupArchive(env *app.Env, src string, ctx context.Context, interruptDone <-chan struct{}) error {
@@ -889,6 +917,22 @@ func finalizeEmptySync(env *app.Env, currentArchive, newArchivePath string, exis
 	}
 	if err := state.BackupCD(env.BackupCD, cdBytes); err != nil {
 		env.Logf("warn", "could not backup central directory: %v", err)
+	}
+
+	// Safe mode storage also applies when the archive only rotates its timestamp.
+	uploadResults := runSafeModeStorage(context.Background(), make(chan struct{}), env, newArchivePath, "")
+	for _, r := range uploadResults {
+		if r.Error != nil {
+			env.Logf("warn", "safe mode storage failed for %s: %v", r.Label, safestorage.MaskError(r.Error))
+			report.Errors++
+			report.ErrorDetails = append(report.ErrorDetails,
+				fmt.Sprintf("safe mode storage %s: %v", r.Label, safestorage.MaskError(r.Error)))
+		} else if r.Skipped {
+			env.Logf("info", "safe mode storage skipped for %s (already complete)", r.Label)
+		} else {
+			env.Logf("info", "safe mode storage completed for %s -> %s", r.Label, r.RemotePath)
+			env.Summary("Safe copy: %s", r.Label)
+		}
 	}
 
 	report.Duration = time.Since(start)
