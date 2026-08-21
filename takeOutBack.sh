@@ -1,14 +1,32 @@
 #!/usr/bin/env bash
 # takeOutBack launcher for Linux.
-# Resolves the project root from the script's location and invokes the local
-# portable binary. No installation, no PATH, no admin rights required.
+# Resolves the project root from the script's location, applies any staged
+# update and invokes the local portable binary. No installation, no PATH,
+# no admin rights required.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UPDATE_DIR="${SCRIPT_DIR}/TakeOutBack/.update"
 BIN="${SCRIPT_DIR}/TakeOutBack/tools/linux/takeoutback"
-NEXT="${BIN}.next"
 
-# If a staged update exists, replace the current binary before launching.
+# Apply a staged update created by 'takeoutback update'. The .update directory
+# mirrors the project layout: TakeOutBack/... plus root-level files.
+if [ -f "${UPDATE_DIR}/pending" ]; then
+    echo "Applying staged update..."
+    if [ -d "${UPDATE_DIR}/TakeOutBack" ]; then
+        cp -a "${UPDATE_DIR}/TakeOutBack/." "${SCRIPT_DIR}/TakeOutBack/"
+    fi
+    for f in takeOutBack.sh takeOutBack.bat README.md CHANGELOG.md; do
+        if [ -f "${UPDATE_DIR}/${f}" ]; then
+            cp -f "${UPDATE_DIR}/${f}" "${SCRIPT_DIR}/${f}"
+        fi
+    done
+    rm -rf "${UPDATE_DIR}"
+    echo "Update applied."
+fi
+
+# Legacy .next file support: remove after one migration cycle.
+NEXT="${BIN}.next"
 if [ -f "${NEXT}" ]; then
     mv -f "${BIN}" "${BIN}.old" 2>/dev/null || true
     mv -f "${NEXT}" "${BIN}" 2>/dev/null || true

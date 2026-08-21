@@ -15,13 +15,6 @@ import (
 )
 
 func main() {
-	// On Windows a running executable cannot be overwritten. The updater stages
-	// the new binary as <exe>.next; apply it now, before this process locks the
-	// file again for the rest of the run.
-	if err := updater.ApplyStagedUpdate(); err != nil {
-		fmt.Fprintf(os.Stderr, "takeoutback: staged update failed: %v\n", err)
-	}
-
 	opts := app.EnvOptions{}
 	var sub []string
 	cmd := ""
@@ -124,6 +117,10 @@ func main() {
 		runErr = engine.Compact(env, sub)
 	case "update":
 		runErr = updater.Update(env, sub)
+		if runErr == updater.ErrRestartRequired {
+			fmt.Println("Please restart TakeOutBack to complete the update.")
+			return
+		}
 	case "clean":
 		runErr = engine.Clean(env, sub)
 	case "menu":
@@ -242,10 +239,15 @@ takeOutBack Menu
 			if ver != "" {
 				args = []string{"--version", ver}
 			}
-			if err := updater.Update(env, args); err != nil {
+			err = updater.Update(env, args)
+			env.Close()
+			if err == updater.ErrRestartRequired {
+				fmt.Println("Please restart TakeOutBack to complete the update.")
+				return nil
+			}
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
-			env.Close()
 		case "5":
 			opts := promptBaseOptions(reader, defaultRoot)
 			env, err := app.NewEnv(opts)

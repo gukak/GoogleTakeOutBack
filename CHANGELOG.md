@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.8] - 2026-08-21
+
+### Changed
+- Releases are now published as a single archive (`takeoutback-vX.Y.Z.zip`)
+  containing all assets. The updater downloads this archive instead of individual
+  files.
+- Updates are now staged and applied on the next launch by the launcher script.
+  This fixes the Windows "Access is denied" error when replacing a running
+  executable.
+- `takeOutBack.sh` and `takeOutBack.bat` now check for a staged update in
+  `TakeOutBack/.update/` and apply it before launching the application.
+- After an update is staged from the interactive menu, the application exits so
+  the user can restart and complete the update.
+- The launcher scripts are expected to stay identical across releases. If an
+  update would change them, it is refused and the user is asked to update
+  manually.
+
 ## [v0.6.7] - 2026-08-21
 
 ### Added

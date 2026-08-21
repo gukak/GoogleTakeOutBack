@@ -1,13 +1,16 @@
-// Package updater implements the self-update command. It downloads the latest
-// release assets from GitHub, verifies binary checksums and atomically replaces
-// the running binary along with its companion files.
+// Package updater implements the self-update command. It downloads the release
+// archive from GitHub, validates binary checksums, stages the new files and
+// asks the user to restart. The launcher scripts then apply the staged update
+// before starting the application.
 package updater
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,8 +25,12 @@ import (
 	"github.com/gukak/GoogleTakeOutBack/internal/progressbar"
 )
 
-// Update checks GitHub Releases for a newer version and installs it.
-// If --version vX.Y.Z is provided, that exact version is installed instead.
+// ErrRestartRequired is returned when the update has been staged successfully
+// and the application must be restarted to complete the replacement.
+var ErrRestartRequired = errors.New("restart required to complete the update")
+
+// Update checks GitHub Releases for a newer version and stages it.
+// If --version vX.Y.Z is provided, that exact version is staged instead.
 func Update(env *app.Env, args []string) error {
 	client := &http.Client{
 		Timeout: 60 * time.Second,
@@ -59,9 +66,7 @@ func Update(env *app.Env, args []string) error {
 		return installVersion(env, client, target)
 	}
 
-	// Resolve the latest tag via the GitHub API. This is more reliable than
-	// following the /releases/latest redirect, which can be cached or blocked.
-	latest, _, err := resolveLatestRelease(client)
+	latest, err := resolveLatestRelease(client)
 	if err != nil {
 		env.Summary("Update check failed: %v", err)
 		return nil
@@ -77,68 +82,33 @@ func Update(env *app.Env, args []string) error {
 	return installVersion(env, client, latest)
 }
 
-type releaseAsset struct {
-	Name string `json:"name"`
-	URL  string `json:"browser_download_url"`
-}
-
-// resolveLatestRelease returns the tag name of the latest GitHub release and
-// its asset list.
-func resolveLatestRelease(client *http.Client) (string, []releaseAsset, error) {
+// resolveLatestRelease returns the tag name of the latest GitHub release.
+func resolveLatestRelease(client *http.Client) (string, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", app.OwnerRepo)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "takeoutback/"+app.Version)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
 	var release struct {
-		TagName string         `json:"tag_name"`
-		Assets  []releaseAsset `json:"assets"`
+		TagName string `json:"tag_name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", nil, fmt.Errorf("cannot parse release metadata: %w", err)
+		return "", fmt.Errorf("cannot parse release metadata: %w", err)
 	}
-	return release.TagName, release.Assets, nil
-}
-
-// fetchReleaseAssets returns the assets for a specific tag.
-func fetchReleaseAssets(client *http.Client, version string) ([]releaseAsset, error) {
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", app.OwnerRepo, version)
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "takeoutback/"+app.Version)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
-	}
-
-	var release struct {
-		Assets []releaseAsset `json:"assets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("cannot parse release metadata: %w", err)
-	}
-	return release.Assets, nil
+	return release.TagName, nil
 }
 
 func installVersion(env *app.Env, client *http.Client, version string) error {
@@ -146,22 +116,15 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 		version = "v" + version
 	}
 
-	assets, err := fetchReleaseAssets(client, version)
-	if err != nil {
-		return err
-	}
-	assetMap := make(map[string]releaseAsset, len(assets))
-	for _, a := range assets {
-		assetMap[a.Name] = a
-	}
+	archiveName := "takeoutback-" + version + ".zip"
+	archiveURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", app.OwnerRepo, version, archiveName)
 
-	binName := app.BinaryName()
-	otherBinName := otherPlatformBinaryName()
-	for _, name := range []string{binName, binName + ".sha256", otherBinName, otherBinName + ".sha256"} {
-		if _, ok := assetMap[name]; !ok {
-			return fmt.Errorf("release %s is missing asset %s", version, name)
-		}
-	}
+	// GitHub asset downloads redirect to a CDN. Use a client that follows
+	// redirects for the actual file downloads. The timeout is long because
+	// users on slow links need time to download the multi-megabyte archive.
+	downloadClient := &http.Client{Timeout: 15 * time.Minute}
+
+	env.Summary("Downloading %s...", version)
 
 	tmpDir := filepath.Join(filepath.Dir(env.BinaryPath()), ".tmp", "update-"+version)
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
@@ -169,68 +132,73 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// GitHub asset downloads redirect to a CDN. Use a client that follows
-	// redirects for the actual file downloads. The timeout is long because
-	// users on slow links need time to download the multi-megabyte binaries.
-	downloadClient := &http.Client{Timeout: 15 * time.Minute}
+	archivePath := filepath.Join(tmpDir, archiveName)
+	if err := downloadFile(downloadClient, archiveURL, archivePath, version); err != nil {
+		return err
+	}
 
-	env.Summary("Downloading %s...", version)
+	extractDir := filepath.Join(tmpDir, "extracted")
+	if err := extractZip(archivePath, extractDir); err != nil {
+		return fmt.Errorf("cannot extract archive: %w", err)
+	}
 
-	// Download all non-checksum assets. Checksums are fetched alongside the
-	// binaries they verify.
-	for _, a := range assets {
-		if strings.HasSuffix(a.Name, ".sha256") {
-			continue
-		}
-		dst := filepath.Join(tmpDir, a.Name)
-		if isBinaryAsset(a.Name) {
-			sumAsset := assetMap[a.Name+".sha256"]
-			if err := downloadBinary(downloadClient, a.URL, sumAsset.URL, dst, version); err != nil {
-				return err
+	if err := verifyBinaries(extractDir); err != nil {
+		return err
+	}
+
+	// The launcher scripts cannot be replaced while they are running. They are
+	// expected to stay identical across releases so that the launcher itself can
+	// apply staged updates. If they changed, the user must update manually.
+	for _, launcher := range []string{"takeOutBack.sh", "takeOutBack.bat"} {
+		local := filepath.Join(env.Root, launcher)
+		remote := filepath.Join(extractDir, launcher)
+		if _, err := os.Stat(local); err != nil {
+			if os.IsNotExist(err) {
+				continue
 			}
-			continue
-		}
-		if err := downloadTextFile(downloadClient, a.URL, dst, a.Name); err != nil {
 			return err
 		}
-	}
-
-	// The launcher script cannot be replaced while it is running. If the
-	// release contains a different launcher than the local one, refuse the
-	// update and ask the user to update manually.
-	launcherName := "takeOutBack.sh"
-	if runtime.GOOS == "windows" {
-		launcherName = "takeOutBack.bat"
-	}
-	localLauncher := filepath.Join(env.Root, launcherName)
-	newLauncher := filepath.Join(tmpDir, launcherName)
-	if _, err := os.Stat(localLauncher); err == nil {
-		changed, err := filesDiffer(localLauncher, newLauncher)
+		changed, err := filesDiffer(local, remote)
 		if err != nil {
 			return err
 		}
 		if changed {
-			return fmt.Errorf("%s has changed in %s and cannot be replaced by a running process. Please update manually (see Installation.md)", launcherName, version)
+			return fmt.Errorf("%s has changed in %s. The launcher script is responsible for applying updates and must stay identical across releases. Please update manually", launcher, version)
 		}
 	}
 
-	// Apply all non-config files atomically.
-	type target struct{ src, dst string }
-	targets := []target{
-		{filepath.Join(tmpDir, binName), env.BinaryPath()},
-		{filepath.Join(tmpDir, otherBinName), otherBinaryPath(env)},
-		{filepath.Join(tmpDir, "takeOutBack.sh"), filepath.Join(env.Root, "takeOutBack.sh")},
-		{filepath.Join(tmpDir, "takeOutBack.bat"), filepath.Join(env.Root, "takeOutBack.bat")},
-		{filepath.Join(tmpDir, "install.sh"), filepath.Join(env.AppRoot, app.ScriptsDir, "install.sh")},
-		{filepath.Join(tmpDir, "install.ps1"), filepath.Join(env.AppRoot, app.ScriptsDir, "install.ps1")},
-		{filepath.Join(tmpDir, "README.md"), filepath.Join(env.Root, "README.md")},
-		{filepath.Join(tmpDir, "CHANGELOG.md"), filepath.Join(env.Root, "CHANGELOG.md")},
+	// Merge user configuration with the new defaults so custom settings are kept.
+	if err := mergeSettings(filepath.Join(extractDir, "settings.json"), filepath.Join(env.ConfigDir, app.SettingsName)); err != nil {
+		return err
 	}
-	for _, doc := range []string{"Architecture.md", "Installation.md", "Usage.md", "Development.md", "Troubleshooting.md"} {
-		targets = append(targets, target{filepath.Join(tmpDir, doc), filepath.Join(env.AppRoot, app.DocsDir, doc)})
+	if err := mergePolicy(filepath.Join(extractDir, "policy.json"), filepath.Join(env.ConfigDir, app.PolicyName)); err != nil {
+		return err
 	}
 
-	for _, t := range targets {
+	// Stage all files for the launcher to apply on the next start.
+	stageDir := filepath.Join(env.AppRoot, ".update")
+	if err := os.RemoveAll(stageDir); err != nil {
+		return err
+	}
+
+	stageTargets := []struct{ src, dst string }{
+		{filepath.Join(extractDir, app.BinaryName()), filepath.Join(stageDir, app.ToolsDir, "linux", app.LinuxBinaryName)},
+		{filepath.Join(extractDir, otherPlatformBinaryName()), filepath.Join(stageDir, app.ToolsDir, "windows", app.WindowsBinaryName)},
+		{filepath.Join(extractDir, "takeOutBack.sh"), filepath.Join(stageDir, "..", "takeOutBack.sh")},
+		{filepath.Join(extractDir, "takeOutBack.bat"), filepath.Join(stageDir, "..", "takeOutBack.bat")},
+		{filepath.Join(extractDir, "install.sh"), filepath.Join(stageDir, app.ScriptsDir, "install.sh")},
+		{filepath.Join(extractDir, "install.ps1"), filepath.Join(stageDir, app.ScriptsDir, "install.ps1")},
+		{filepath.Join(extractDir, "README.md"), filepath.Join(stageDir, "..", "README.md")},
+		{filepath.Join(extractDir, "CHANGELOG.md"), filepath.Join(stageDir, "..", "CHANGELOG.md")},
+	}
+	for _, doc := range []string{"Architecture.md", "Installation.md", "Usage.md", "Development.md", "Troubleshooting.md"} {
+		stageTargets = append(stageTargets, struct{ src, dst string }{
+			filepath.Join(extractDir, doc),
+			filepath.Join(stageDir, app.DocsDir, doc),
+		})
+	}
+
+	for _, t := range stageTargets {
 		if _, err := os.Stat(t.src); err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -240,33 +208,38 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 		if err := os.MkdirAll(filepath.Dir(t.dst), 0755); err != nil {
 			return err
 		}
-		if err := replaceFile(t.src, t.dst); err != nil {
+		if err := copyFile(t.src, t.dst); err != nil {
 			return err
 		}
-		// Restore executable bit on binaries; the temp file was created with
-		// default permissions and GitHub releases do not carry mode metadata.
-		if isBinaryAsset(filepath.Base(t.src)) {
-			if err := os.Chmod(t.dst, 0755); err != nil {
-				return err
+	}
+
+	// Copy the merged configuration files into the stage area.
+	for _, cfg := range []struct{ src, dst string }{
+		{filepath.Join(env.ConfigDir, app.SettingsName), filepath.Join(stageDir, app.ConfigDir, app.SettingsName)},
+		{filepath.Join(env.ConfigDir, app.PolicyName), filepath.Join(stageDir, app.ConfigDir, app.PolicyName)},
+	} {
+		if _, err := os.Stat(cfg.src); err != nil {
+			if os.IsNotExist(err) {
+				continue
 			}
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(cfg.dst), 0755); err != nil {
+			return err
+		}
+		if err := copyFile(cfg.src, cfg.dst); err != nil {
+			return err
 		}
 	}
 
-	// Merge new default fields into existing user configuration files so that
-	// custom settings are never overwritten.
-	if err := mergeSettings(filepath.Join(tmpDir, "settings.json"), filepath.Join(env.ConfigDir, app.SettingsName)); err != nil {
-		return err
-	}
-	if err := mergePolicy(filepath.Join(tmpDir, "policy.json"), filepath.Join(env.ConfigDir, app.PolicyName)); err != nil {
+	// Create the pending flag so the launcher knows it must apply the update.
+	pendingFlag := filepath.Join(stageDir, "pending")
+	if err := os.WriteFile(pendingFlag, []byte(version+"\n"), 0644); err != nil {
 		return err
 	}
 
-	env.Summary("Updated to %s", version)
-	return nil
-}
-
-func isBinaryAsset(name string) bool {
-	return name == "takeoutback-linux-amd64" || name == "takeoutback-windows-amd64.exe"
+	env.Summary("Update to %s staged. Restart TakeOutBack to complete the update.", version)
+	return ErrRestartRequired
 }
 
 func otherPlatformBinaryName() string {
@@ -276,29 +249,21 @@ func otherPlatformBinaryName() string {
 	return "takeoutback-windows-amd64.exe"
 }
 
-func otherBinaryPath(env *app.Env) string {
-	if runtime.GOOS == "windows" {
-		return env.ToolsLinux
-	}
-	return env.ToolsWin
-}
-
-// downloadBinary downloads a release binary and verifies its SHA-256 checksum.
-func downloadBinary(client *http.Client, url, sumURL, dst, label string) error {
-	if err := downloadFile(client, url, dst, label); err != nil {
-		return err
-	}
-	expected, err := downloadText(client, sumURL)
-	if err != nil {
-		return fmt.Errorf("cannot fetch checksum: %w", err)
-	}
-	expected = strings.Fields(expected)[0]
-	got, err := fileSHA256(dst)
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(got, expected) {
-		return fmt.Errorf("checksum mismatch for %s: expected %s got %s", filepath.Base(dst), expected, got)
+func verifyBinaries(dir string) error {
+	for _, name := range []string{"takeoutback-linux-amd64", "takeoutback-windows-amd64.exe"} {
+		binPath := filepath.Join(dir, name)
+		sumPath := binPath + ".sha256"
+		expected, err := readFirstField(sumPath)
+		if err != nil {
+			return fmt.Errorf("cannot read checksum for %s: %w", name, err)
+		}
+		got, err := fileSHA256(binPath)
+		if err != nil {
+			return fmt.Errorf("cannot hash %s: %w", name, err)
+		}
+		if !strings.EqualFold(got, expected) {
+			return fmt.Errorf("checksum mismatch for %s: expected %s got %s", name, expected, got)
+		}
 	}
 	return nil
 }
@@ -349,43 +314,48 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func downloadTextFile(client *http.Client, url, dst, label string) error {
-	resp, err := client.Get(url)
+func extractZip(src, dst string) error {
+	r, err := zip.OpenReader(src)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	defer r.Close()
+	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
+	for _, f := range r.File {
+		path := filepath.Join(dst, f.Name)
+		if !strings.HasPrefix(path, filepath.Clean(dst)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal zip path: %s", f.Name)
+		}
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(path, f.Mode()); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return err
+		}
+		out, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			_ = out.Close()
+			return err
+		}
+		_, err = io.Copy(out, rc)
+		_ = rc.Close()
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return err
+		}
 	}
-	defer out.Close()
-
-	fmt.Printf("  downloading %s...\n", label)
-	_, err = io.Copy(out, resp.Body)
-	return err
-}
-
-func downloadText(client *http.Client, url string) (string, error) {
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, resp.Body); err != nil {
-		return "", err
-	}
-	return strings.Fields(buf.String())[0], nil
+	return nil
 }
 
 func fileSHA256(path string) (string, error) {
@@ -401,6 +371,18 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+func readFirstField(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("empty checksum file %s", path)
+	}
+	return fields[0], nil
+}
+
 func filesDiffer(a, b string) (bool, error) {
 	fa, err := os.ReadFile(a)
 	if err != nil {
@@ -413,13 +395,24 @@ func filesDiffer(a, b string) (bool, error) {
 	return !bytes.Equal(fa, fb), nil
 }
 
-// replaceFile atomically replaces dst with src.
-func replaceFile(src, dst string) error {
-	// Windows does not allow renaming over an existing file.
-	if runtime.GOOS == "windows" {
-		_ = os.Remove(dst)
+func copyFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
 	}
-	return os.Rename(src, dst)
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if cerr := out.Close(); cerr != nil && err == nil {
+		err = cerr
+	}
+	return err
 }
 
 func mergeSettings(defaultsPath, localPath string) error {
@@ -432,7 +425,6 @@ func mergeSettings(defaultsPath, localPath string) error {
 		return err
 	}
 	merged := mergeMap(defaults, local)
-	// Deep-merge the nested safe_mode_storage object.
 	if defStorage, ok := defaults["safe_mode_storage"].(map[string]any); ok {
 		if localStorage, ok := local["safe_mode_storage"].(map[string]any); ok {
 			merged["safe_mode_storage"] = mergeMap(defStorage, localStorage)
@@ -477,7 +469,6 @@ func writeJSON(path string, m map[string]any) error {
 	return os.Rename(tmp, path)
 }
 
-// mergeMap returns a copy of dst with any missing top-level keys filled from src.
 func mergeMap(src, dst map[string]any) map[string]any {
 	out := make(map[string]any, len(dst)+len(src))
 	for k, v := range src {
@@ -506,38 +497,6 @@ func looksLikeVersion(s string) bool {
 		}
 	}
 	return true
-}
-
-// ApplyStagedUpdate replaces the running binary with a previously staged
-// <binary>.next file. This is used on Windows where a running executable cannot
-// be overwritten directly; the updater writes the new binary next to the old one
-// and the replacement happens on the next startup.
-func ApplyStagedUpdate() error {
-	current, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	current, err = filepath.EvalSymlinks(current)
-	if err != nil {
-		return err
-	}
-	next := current + ".next"
-	if _, err := os.Stat(next); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	old := current + ".old"
-	if err := os.Rename(current, old); err != nil {
-		return fmt.Errorf("rename current binary: %w", err)
-	}
-	if err := os.Rename(next, current); err != nil {
-		_ = os.Rename(old, current)
-		return fmt.Errorf("rename staged binary: %w", err)
-	}
-	_ = os.Remove(old)
-	return nil
 }
 
 // compareVersion compares two semantic version strings starting with 'v'.
