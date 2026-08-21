@@ -181,20 +181,21 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 		return err
 	}
 
+	stageRoot := filepath.Join(stageDir, app.AppDir)
 	stageTargets := []struct{ src, dst string }{
-		{filepath.Join(extractDir, app.BinaryName()), filepath.Join(stageDir, app.ToolsDir, "linux", app.LinuxBinaryName)},
-		{filepath.Join(extractDir, otherPlatformBinaryName()), filepath.Join(stageDir, app.ToolsDir, "windows", app.WindowsBinaryName)},
-		{filepath.Join(extractDir, "takeOutBack.sh"), filepath.Join(stageDir, "..", "takeOutBack.sh")},
-		{filepath.Join(extractDir, "takeOutBack.bat"), filepath.Join(stageDir, "..", "takeOutBack.bat")},
-		{filepath.Join(extractDir, "install.sh"), filepath.Join(stageDir, app.ScriptsDir, "install.sh")},
-		{filepath.Join(extractDir, "install.ps1"), filepath.Join(stageDir, app.ScriptsDir, "install.ps1")},
-		{filepath.Join(extractDir, "README.md"), filepath.Join(stageDir, "..", "README.md")},
-		{filepath.Join(extractDir, "CHANGELOG.md"), filepath.Join(stageDir, "..", "CHANGELOG.md")},
+		{filepath.Join(extractDir, app.BinaryName()), filepath.Join(stageRoot, app.ToolsDir, "linux", app.LinuxBinaryName)},
+		{filepath.Join(extractDir, otherPlatformBinaryName()), filepath.Join(stageRoot, app.ToolsDir, "windows", app.WindowsBinaryName)},
+		{filepath.Join(extractDir, "takeOutBack.sh"), filepath.Join(stageDir, "takeOutBack.sh")},
+		{filepath.Join(extractDir, "takeOutBack.bat"), filepath.Join(stageDir, "takeOutBack.bat")},
+		{filepath.Join(extractDir, "install.sh"), filepath.Join(stageRoot, app.ScriptsDir, "install.sh")},
+		{filepath.Join(extractDir, "install.ps1"), filepath.Join(stageRoot, app.ScriptsDir, "install.ps1")},
+		{filepath.Join(extractDir, "README.md"), filepath.Join(stageDir, "README.md")},
+		{filepath.Join(extractDir, "CHANGELOG.md"), filepath.Join(stageDir, "CHANGELOG.md")},
 	}
 	for _, doc := range []string{"Architecture.md", "Installation.md", "Usage.md", "Development.md", "Troubleshooting.md"} {
 		stageTargets = append(stageTargets, struct{ src, dst string }{
 			filepath.Join(extractDir, doc),
-			filepath.Join(stageDir, app.DocsDir, doc),
+			filepath.Join(stageRoot, app.DocsDir, doc),
 		})
 	}
 
@@ -215,8 +216,8 @@ func installVersion(env *app.Env, client *http.Client, version string) error {
 
 	// Copy the merged configuration files into the stage area.
 	for _, cfg := range []struct{ src, dst string }{
-		{filepath.Join(env.ConfigDir, app.SettingsName), filepath.Join(stageDir, app.ConfigDir, app.SettingsName)},
-		{filepath.Join(env.ConfigDir, app.PolicyName), filepath.Join(stageDir, app.ConfigDir, app.PolicyName)},
+		{filepath.Join(env.ConfigDir, app.SettingsName), filepath.Join(stageRoot, app.ConfigDir, app.SettingsName)},
+		{filepath.Join(env.ConfigDir, app.PolicyName), filepath.Join(stageRoot, app.ConfigDir, app.PolicyName)},
 	} {
 		if _, err := os.Stat(cfg.src); err != nil {
 			if os.IsNotExist(err) {

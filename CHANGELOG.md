@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.9] - 2026-08-21
+
+### Fixed
+- Linux launcher script (`takeOutBack.sh`) now applies staged updates
+  atomically, avoiding the "Text file busy" error when replacing the running
+  binary.
+
+### Changed
+- The launcher scripts (`takeOutBack.sh` / `takeOutBack.bat`) have been updated
+  to support the new staged-update mechanism. Because they changed in this
+  release, updating from v0.6.8 to v0.6.9 must be done manually: replace
+  `takeOutBack.sh` and `takeOutBack.bat` with the versions from the release,
+  then restart. Future releases will keep these scripts identical and updates
+  will be fully automatic again.
+
 ## [v0.6.8] - 2026-08-21
 
 ### Changed
