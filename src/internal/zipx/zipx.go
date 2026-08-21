@@ -447,11 +447,11 @@ func WriteCentralDir(w *os.File, entries []*Entry) (*EOCD, error) {
 	}
 
 	if needsZip64 || cdStart > 0xFFFFFFFF || cdSize > 0xFFFFFFFF || uint64(len(entries)) > 0xFFFF {
-		if err := writeZip64EOCD(w, eocd); err != nil {
+		if err := WriteZip64EOCD(w, eocd); err != nil {
 			return nil, err
 		}
 	}
-	if err := writeEOCD(w, eocd, needsZip64); err != nil {
+	if err := WriteEOCD(w, eocd, needsZip64); err != nil {
 		return nil, err
 	}
 	return eocd, nil
@@ -538,7 +538,7 @@ func prepareZip64Fields(e *Entry, local bool) (cs32, us32, off32 uint32, extra [
 	return
 }
 
-func writeZip64EOCD(w *os.File, eocd *EOCD) error {
+func WriteZip64EOCD(w *os.File, eocd *EOCD) error {
 	rec := make([]byte, Zip64EOCDRecordSize)
 	binary.LittleEndian.PutUint32(rec[0:], SigZip64EOCD)
 	binary.LittleEndian.PutUint64(rec[4:], uint64(Zip64EOCDRecordSize-12))
@@ -566,7 +566,7 @@ func writeZip64EOCD(w *os.File, eocd *EOCD) error {
 	return err
 }
 
-func writeEOCD(w *os.File, eocd *EOCD, zip64 bool) error {
+func WriteEOCD(w *os.File, eocd *EOCD, zip64 bool) error {
 	var buf [EOCDSize]byte
 	binary.LittleEndian.PutUint32(buf[0:], SigEOCD)
 	binary.LittleEndian.PutUint16(buf[4:], 0)

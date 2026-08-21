@@ -57,9 +57,7 @@ func (p *progressBar) printLine(content string) {
 
 // finish marks the bar as complete and moves to the next line.
 func (p *progressBar) finish() {
-	if p.total > 0 {
-		p.update(p.total)
-	}
+	p.update(p.total)
 	fmt.Println()
 }
 

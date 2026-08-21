@@ -226,7 +226,7 @@ func Sync(env *app.Env, args []string) error {
 
 	for _, path := range incomingFiles {
 		if interrupted(syncCtx, interruptDone) {
-			cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+			cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive, newArchivePath)
 			return fmt.Errorf("sync aborted by user")
 		}
 		src, err := zipx.OpenFileRead(path)
@@ -243,7 +243,7 @@ func Sync(env *app.Env, args []string) error {
 		for _, e := range src.Entries {
 			if interrupted(syncCtx, interruptDone) {
 				_ = src.Close()
-				cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+				cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive, newArchivePath)
 				return fmt.Errorf("sync aborted by user")
 			}
 			report.FilesScanned++
@@ -278,7 +278,7 @@ func Sync(env *app.Env, args []string) error {
 				if err != nil {
 					if err == context.Canceled {
 						_ = src.Close()
-						cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+						cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive, newArchivePath)
 						return fmt.Errorf("sync aborted by user")
 					}
 					report.Errors++
@@ -293,7 +293,7 @@ func Sync(env *app.Env, args []string) error {
 				if err != nil {
 					if err == context.Canceled {
 						_ = src.Close()
-						cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive)
+						cleanupOnAbort(env, archiveDst, addedDst, addedArchivePath, currentArchive, newArchivePath)
 						return fmt.Errorf("sync aborted by user")
 					}
 					report.Errors++
@@ -462,7 +462,7 @@ func interrupted(ctx context.Context, interruptDone <-chan struct{}) bool {
 
 // cleanupOnAbort closes and removes partially written files when the sync is
 // aborted by the user, then attempts to recover the original archive.
-func cleanupOnAbort(env *app.Env, archiveDst, addedDst *os.File, addedArchivePath, currentArchive string) {
+func cleanupOnAbort(env *app.Env, archiveDst, addedDst *os.File, addedArchivePath, currentArchive, newArchivePath string) {
 	if archiveDst != nil {
 		_ = archiveDst.Close()
 	}
@@ -472,6 +472,12 @@ func cleanupOnAbort(env *app.Env, archiveDst, addedDst *os.File, addedArchivePat
 	}
 	if currentArchive != "" {
 		_ = recoverArchive(env, currentArchive)
+		return
+	}
+	// Initial import: there is no previous archive to recover. Remove the
+	// partially written new archive so the next run does not see a corrupt file.
+	if newArchivePath != "" {
+		_ = os.Remove(newArchivePath)
 	}
 }
 
@@ -987,7 +993,7 @@ func recoverArchive(env *app.Env, archivePath string) error {
 	if s, err := state.Load(env.StatePath); err == nil && s.ArchiveEnd > 0 && s.ArchiveEnd <= st.Size() {
 		env.Logf("info", "truncating archive to last known good size %d", s.ArchiveEnd)
 		_ = f.Close()
-		if err := os.Truncate(archivePath, s.ArchiveEnd); err != nil {
+		if err := truncateAndSync(archivePath, s.ArchiveEnd); err != nil {
 			return err
 		}
 		check, err := os.Open(archivePath)
@@ -998,6 +1004,20 @@ func recoverArchive(env *app.Env, archivePath string) error {
 		_ = check.Close()
 		if err2 == nil {
 			return nil
+		}
+		env.Logf("warn", "truncation restored size but EOCD still missing: %v", err2)
+		// Continue to backup-CD restore below.
+	}
+
+	// Try to restore the central directory from the sidecar backup.
+	if s, err := state.Load(env.StatePath); err == nil && s.CDOffset > 0 && s.CDSize > 0 {
+		if cdBytes, err := state.ReadCDBytes(env.BackupCD, s); err == nil && len(cdBytes) == int(s.CDSize) {
+			env.Logf("info", "restoring central directory from backup (%d bytes)", len(cdBytes))
+			_ = f.Close()
+			if err := restoreCentralDir(archivePath, cdBytes, s); err == nil {
+				return nil
+			}
+			env.Logf("warn", "backup CD restore failed: %v", err)
 		}
 	}
 
@@ -1052,6 +1072,59 @@ func recoverArchive(env *app.Env, archivePath string) error {
 		return err
 	}
 	return nil
+}
+
+func truncateAndSync(path string, size int64) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Truncate(size); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// restoreCentralDir truncates the archive to the recorded central-directory
+// offset and rewrites the central directory + EOCD from the sidecar backup.
+func restoreCentralDir(archivePath string, cdBytes []byte, s *state.State) error {
+	f, err := os.OpenFile(archivePath, os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Truncate(s.CDOffset); err != nil {
+		return err
+	}
+	if _, err := f.Seek(s.CDOffset, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := f.Write(cdBytes); err != nil {
+		return err
+	}
+	eocd := zipx.EOCD{
+		DiskNumber:    0,
+		StartDisk:     0,
+		EntriesOnDisk: uint64(s.Entries),
+		TotalEntries:  uint64(s.Entries),
+		CDSize:        uint64(s.CDSize),
+		CDOffset:      uint64(s.CDOffset),
+	}
+	needsZip64 := s.Entries > 0xFFFF || s.CDSize > 0xFFFFFFFF || s.CDOffset > 0xFFFFFFFF
+	if needsZip64 {
+		eocd.HasZip64 = true
+		if err := zipx.WriteZip64EOCD(f, &eocd); err != nil {
+			return err
+		}
+	}
+	if err := zipx.WriteEOCD(f, &eocd, needsZip64); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 // Clean removes all user data (Incoming, Archive and Backup files) and resets

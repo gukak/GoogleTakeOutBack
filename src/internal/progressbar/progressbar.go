@@ -96,15 +96,17 @@ func (p *Byte) printLine(content string) {
 	fmt.Print("\r" + content + "\033[K")
 }
 
-// Finish marks the bar as complete and moves to the next line.
+// Finish marks the bar as complete and moves to the next line. It always
+// redraws the bar so the final 100% state is visible even if the last Add
+// call was skipped by the 100 ms throttle.
 func (p *Byte) Finish() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.total > 0 && p.current < p.total {
 		p.current = p.total
-		p.lastUpdate = time.Now().Add(-time.Hour)
-		p.update()
 	}
+	p.lastUpdate = time.Now().Add(-time.Hour)
+	p.update()
 	fmt.Println()
 }
 

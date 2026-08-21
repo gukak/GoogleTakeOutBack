@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.6] - 2026-08-21
+
+### Fixed
+- Progress bars now always render the final 100% state before moving to the next
+  line, even when the last progress increment was throttled.
+- Interrupting the very first sync no longer leaves a corrupt partial archive.
+  The partial file is removed so the next run starts clean.
+- Recovery after an interrupted subsequent sync is more robust: the archive is
+  truncated to the last known good size and, if needed, the central directory
+  is restored from the sidecar backup.
+
+### Changed
+- Self-update now downloads every release asset (binaries, launchers,
+  installers and documentation), not only the executable.
+- `settings.json` and `policy.json` are merged with the release defaults so
+  user configuration is never overwritten.
+- If the launcher script (`takeOutBack.sh` / `takeOutBack.bat`) has changed in
+  the target release, the updater refuses the self-update and explains that a
+  manual update is required because the running launcher cannot be replaced.
+- Menu option 6 (Exit) exits immediately without asking for confirmation.
+
 ## [v0.6.5] - 2026-08-20
 
 ### Fixed
